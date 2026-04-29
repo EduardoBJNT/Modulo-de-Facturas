@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>CFDI {{ comprobante.Serie }}{{ comprobante.Folio }} — {{ emisor.Nombre }}</title>
+    <style>
+        /* === RESET & BASE === */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        @page {
+            size: letter;
+            margin: 12mm 14mm 18mm 14mm;
+        }
+        
+        body {
+            font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+            font-size: 8.5pt;
+            color: #1a1a2e;
+            line-height: 1.4;
+            background: white;
+        }
+
+        /* === HEADER === */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #0f172a;
+            margin-bottom: 10px;
+        }
+
+        .header-left {
+            flex: 1;
+        }
+
+        .company-name {
+            font-size: 14pt;
+            font-weight: 800;
+            color: #0f172a;
+            letter-spacing: -0.02em;
+            margin-bottom: 2px;
+        }
+
+        .company-rfc {
+            font-size: 9pt;
+            font-weight: 600;
+            color: #3b82f6;
+            margin-bottom: 4px;
+        }
+
+        .company-regimen {
+            font-size: 7.5pt;
+            color: #64748b;
+        }
+
+        .header-right {
+            text-align: right;
+        }
+
+        .invoice-type-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #0f172a, #1e293b);
+            color: white;
+            padding: 6px 18px;
+            border-radius: 4px;
+            font-size: 9pt;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 6px;
+        }
+
+        .invoice-folio {
+            font-size: 11pt;
+            font-weight: 800;
+            color: #0f172a;
+        }
+
+        .invoice-date {
+            font-size: 7.5pt;
+            color: #64748b;
+            margin-top: 2px;
+        }
+
+        /* === FOLIO FISCAL (UUID) BANNER === */
+        .uuid-banner {
+            background: linear-gradient(135deg, #eff6ff, #dbeafe);
+            border: 1px solid #93c5fd;
+            border-radius: 6px;
+            padding: 8px 14px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .uuid-label {
+            font-size: 7pt;
+            font-weight: 700;
+            color: #3b82f6;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .uuid-value {
+            font-size: 9.5pt;
+            font-weight: 700;
+            color: #1e40af;
+            letter-spacing: 0.02em;
+            font-family: 'Courier New', monospace;
+        }
+
+        .uuid-right {
+            text-align: right;
+        }
+
+        .uuid-right .uuid-label { margin-bottom: 1px; }
+
+        /* === TWO-COLUMN INFO === */
+        .info-grid {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .info-box {
+            flex: 1;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .info-box-header {
+            background: #f8fafc;
+            padding: 5px 10px;
+            font-size: 7pt;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .info-box-body {
+            padding: 8px 10px;
+        }
+
+        .info-row {
+            display: flex;
+            margin-bottom: 3px;
+        }
+
+        .info-label {
+            width: 120px;
+            font-size: 7pt;
+            font-weight: 600;
+            color: #94a3b8;
+            text-transform: uppercase;
+            flex-shrink: 0;
+        }
+
+        .info-value {
+            font-size: 8pt;
+            font-weight: 500;
+            color: #1a1a2e;
+            flex: 1;
+        }
+
+        .info-value.bold {
+            font-weight: 700;
+        }
+
+        /* === CONCEPTOS TABLE === */
+        .section-title {
+            font-size: 8pt;
+            font-weight: 700;
+            color: #0f172a;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .concepts-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+            font-size: 7.5pt;
+        }
+
+        .concepts-table thead th {
+            background: #0f172a;
+            color: white;
+            padding: 5px 8px;
+            font-size: 6.5pt;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            text-align: left;
+        }
+
+        .concepts-table thead th.right {
+            text-align: right;
+        }
+
+        .concepts-table thead th.center {
+            text-align: center;
+        }
+
+        .concepts-table tbody td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #f1f5f9;
+            vertical-align: top;
+        }
+
+        .concepts-table tbody tr:nth-child(even) {
+            background: #fafbfc;
+        }
+
+        .concepts-table .right {
+            text-align: right;
+        }
+
+        .concepts-table .center {
+            text-align: center;
+        }
+
+        .concept-desc {
+            font-weight: 500;
+            color: #1a1a2e;
+        }
+
+        .concept-key {
+            font-size: 6.5pt;
+            color: #94a3b8;
+            font-family: 'Courier New', monospace;
+        }
+
+        .concept-tax-detail {
+            font-size: 6pt;
+            color: #64748b;
+            margin-top: 1px;
+        }
+
+        /* === TOTALS === */
+        .totals-section {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 10px;
+        }
+
+        .totals-box {
+            width: 280px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 12px;
+            font-size: 7.5pt;
+        }
+
+        .total-row.even {
+            background: #fafbfc;
+        }
+
+        .total-row .label {
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        .total-row .value {
+            font-weight: 600;
+            color: #1a1a2e;
+            font-family: 'Courier New', monospace;
+        }
+
+        .total-row.grand-total {
+            background: linear-gradient(135deg, #0f172a, #1e293b);
+            color: white;
+            padding: 7px 12px;
+        }
+
+        .total-row.grand-total .label {
+            color: #94a3b8;
+            font-weight: 700;
+            font-size: 8pt;
+        }
+
+        .total-row.grand-total .value {
+            color: white;
+            font-weight: 800;
+            font-size: 10pt;
+        }
+
+        .total-letras {
+            font-size: 7pt;
+            color: #64748b;
+            margin-bottom: 10px;
+            font-style: italic;
+        }
+
+        /* === IMPUESTOS DESGLOSE === */
+        .tax-breakdown {
+            margin-bottom: 10px;
+        }
+
+        .tax-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 7pt;
+        }
+
+        .tax-table th {
+            background: #f8fafc;
+            padding: 4px 8px;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 6.5pt;
+        }
+
+        .tax-table td {
+            padding: 4px 8px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .tax-table .right {
+            text-align: right;
+        }
+
+        /* === FISCAL STAMPS SECTION === */
+        .stamps-section {
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 10px;
+            page-break-inside: avoid;
+        }
+
+        .stamps-header {
+            background: #f8fafc;
+            padding: 5px 10px;
+            font-size: 7pt;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .stamps-body {
+            display: flex;
+            gap: 12px;
+            padding: 10px;
+        }
+
+        .qr-container {
+            flex-shrink: 0;
+            width: 130px;
+            height: 130px;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .qr-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .stamps-data {
+            flex: 1;
+            font-size: 6.5pt;
+            overflow: hidden;
+        }
+
+        .stamp-group {
+            margin-bottom: 6px;
+        }
+
+        .stamp-label {
+            font-size: 6pt;
+            font-weight: 700;
+            color: #3b82f6;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 1px;
+        }
+
+        .stamp-value {
+            font-family: 'Courier New', monospace;
+            font-size: 5.5pt;
+            color: #475569;
+            word-break: break-all;
+            line-height: 1.3;
+        }
+
+        .stamp-value.cadena {
+            font-size: 5pt;
+            line-height: 1.25;
+            max-height: 40px;
+            overflow: hidden;
+        }
+
+        /* === CFDI INFO ROW === */
+        .cfdi-info-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .cfdi-info-item {
+            flex: 1;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            padding: 5px 8px;
+        }
+
+        .cfdi-info-item .label {
+            font-size: 6pt;
+            font-weight: 700;
+            color: #94a3b8;
+            text-transform: uppercase;
+        }
+
+        .cfdi-info-item .value {
+            font-size: 7.5pt;
+            font-weight: 600;
+            color: #1a1a2e;
+        }
+
+        /* === FOOTER === */
+        .footer {
+            margin-top: 12px;
+            padding-top: 8px;
+            border-top: 2px solid #0f172a;
+            page-break-inside: avoid;
+        }
+
+        .footer-legend {
+            font-size: 7pt;
+            color: #64748b;
+            text-align: center;
+            font-weight: 600;
+            font-style: italic;
+        }
+
+        .footer-powered {
+            font-size: 5.5pt;
+            color: #cbd5e1;
+            text-align: center;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ═══ HEADER ═══ -->
+    <div class="header">
+        <div class="header-left">
+            <div class="company-name">{{ emisor.Nombre }}</div>
+            <div class="company-rfc">RFC: {{ emisor.Rfc }}</div>
+            <div class="company-regimen">Régimen Fiscal: {{ emisor.RegimenFiscal }} — {{ emisor.RegimenFiscalDesc }}</div>
+        </div>
+        <div class="header-right">
+            <div class="invoice-type-badge">
+                {{ comprobante.TipoDeComprobanteDesc | upper }} — {{ comprobante.Serie }}{{ comprobante.Folio }}
+            </div>
+            <div class="invoice-date">Fecha: {{ comprobante.FechaFmt }}</div>
+            <div class="invoice-date">Lugar de Expedición: {{ comprobante.LugarExpedicion }}</div>
+        </div>
+    </div>
+
+    <!-- ═══ UUID BANNER ═══ -->
+    {% if timbre.UUID %}
+    <div class="uuid-banner">
+        <div>
+            <div class="uuid-label">Folio Fiscal (UUID)</div>
+            <div class="uuid-value">{{ timbre.UUID }}</div>
+        </div>
+        <div class="uuid-right">
+            <div class="uuid-label">No. Certificado SAT</div>
+            <div class="uuid-value" style="font-size: 8pt;">{{ timbre.NoCertificadoSAT }}</div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ═══ CFDI QUICK INFO ═══ -->
+    <div class="cfdi-info-row">
+        <div class="cfdi-info-item">
+            <div class="label">Forma de Pago</div>
+            <div class="value">{{ comprobante.FormaPago }} — {{ comprobante.FormaPagoDesc }}</div>
+        </div>
+        <div class="cfdi-info-item">
+            <div class="label">Método de Pago</div>
+            <div class="value">{{ comprobante.MetodoPago }} — {{ comprobante.MetodoPagoDesc }}</div>
+        </div>
+        <div class="cfdi-info-item">
+            <div class="label">Moneda</div>
+            <div class="value">{{ comprobante.Moneda }} — {{ comprobante.MonedaDesc }}</div>
+        </div>
+        <div class="cfdi-info-item">
+            <div class="label">No. Certificado Emisor</div>
+            <div class="value">{{ comprobante.NoCertificado }}</div>
+        </div>
+    </div>
+
+    <!-- ═══ EMISOR / RECEPTOR ═══ -->
+    <div class="info-grid">
+        <div class="info-box">
+            <div class="info-box-header">Emisor</div>
+            <div class="info-box-body">
+                <div class="info-row">
+                    <span class="info-label">RFC</span>
+                    <span class="info-value bold">{{ emisor.Rfc }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Razón Social</span>
+                    <span class="info-value">{{ emisor.Nombre }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Régimen Fiscal</span>
+                    <span class="info-value">{{ emisor.RegimenFiscal }} — {{ emisor.RegimenFiscalDesc }}</span>
+                </div>
+            </div>
+        </div>
+        <div class="info-box">
+            <div class="info-box-header">Receptor</div>
+            <div class="info-box-body">
+                <div class="info-row">
+                    <span class="info-label">RFC</span>
+                    <span class="info-value bold">{{ receptor.Rfc }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Razón Social</span>
+                    <span class="info-value">{{ receptor.Nombre }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Domicilio Fiscal</span>
+                    <span class="info-value">{{ receptor.DomicilioFiscalReceptor }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Régimen Fiscal</span>
+                    <span class="info-value">{{ receptor.RegimenFiscalReceptor }} — {{ receptor.RegimenFiscalReceptorDesc }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Uso CFDI</span>
+                    <span class="info-value">{{ receptor.UsoCFDI }} — {{ receptor.UsoCFDIDesc }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ CONCEPTOS ═══ -->
+    <div class="section-title">Conceptos</div>
+    <table class="concepts-table">
+        <thead>
+            <tr>
+                <th style="width:25px;" class="center">#</th>
+                <th style="width:70px;">Clave</th>
+                <th>Descripción</th>
+                <th style="width:50px;" class="center">Cant.</th>
+                <th style="width:40px;" class="center">Unidad</th>
+                <th style="width:75px;" class="right">P. Unitario</th>
+                <th style="width:65px;" class="right">Descuento</th>
+                <th style="width:75px;" class="right">Importe</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in conceptos %}
+            <tr>
+                <td class="center">{{ c.No }}</td>
+                <td>
+                    <span class="concept-key">{{ c.ClaveProdServ }}</span>
+                    {% if c.NoIdentificacion %}
+                    <br><span class="concept-key">ID: {{ c.NoIdentificacion }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="concept-desc">{{ c.Descripcion }}</span>
+                    {% for t in c.Traslados %}
+                    <div class="concept-tax-detail">↳ {{ t.ImpuestoDesc }} {{ t.TasaPct }}: {{ t.ImporteFmt }}</div>
+                    {% endfor %}
+                    {% for r in c.Retenciones %}
+                    <div class="concept-tax-detail">↳ Ret. {{ r.ImpuestoDesc }}: {{ r.ImporteFmt }}</div>
+                    {% endfor %}
+                </td>
+                <td class="center">{{ c.CantidadFmt }}</td>
+                <td class="center">{{ c.ClaveUnidad }}</td>
+                <td class="right">{{ c.ValorUnitarioFmt }}</td>
+                <td class="right">{{ c.DescuentoFmt }}</td>
+                <td class="right" style="font-weight:600;">{{ c.ImporteFmt }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- ═══ IMPUESTOS DESGLOSE ═══ -->
+    {% if impuestos.Traslados or impuestos.Retenciones %}
+    <div class="tax-breakdown">
+        <div class="section-title">Desglose de Impuestos</div>
+        <table class="tax-table">
+            <thead>
+                <tr>
+                    <th>Tipo</th>
+                    <th>Impuesto</th>
+                    <th>Tipo Factor</th>
+                    <th class="right">Tasa</th>
+                    <th class="right">Base</th>
+                    <th class="right">Importe</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in impuestos.Traslados %}
+                <tr>
+                    <td>Traslado</td>
+                    <td>{{ t.ImpuestoDesc }} ({{ t.Impuesto }})</td>
+                    <td>{{ t.TipoFactor }}</td>
+                    <td class="right">{{ t.TasaPct }}</td>
+                    <td class="right">{{ t.BaseFmt }}</td>
+                    <td class="right" style="font-weight:600;">{{ t.ImporteFmt }}</td>
+                </tr>
+                {% endfor %}
+                {% for r in impuestos.Retenciones %}
+                <tr>
+                    <td>Retención</td>
+                    <td>{{ r.ImpuestoDesc }} ({{ r.Impuesto }})</td>
+                    <td>—</td>
+                    <td class="right">—</td>
+                    <td class="right">—</td>
+                    <td class="right" style="font-weight:600; color:#ef4444;">{{ r.ImporteFmt }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- ═══ TOTALES ═══ -->
+    <div class="totals-section">
+        <div class="totals-box">
+            <div class="total-row even">
+                <span class="label">Subtotal</span>
+                <span class="value">{{ comprobante.SubTotalFmt }}</span>
+            </div>
+            {% if comprobante.Descuento != '0.00' and comprobante.Descuento != '' %}
+            <div class="total-row">
+                <span class="label">Descuento</span>
+                <span class="value">-{{ comprobante.DescuentoFmt }}</span>
+            </div>
+            {% endif %}
+            {% for t in impuestos.Traslados %}
+            <div class="total-row even">
+                <span class="label">{{ t.ImpuestoDesc }} ({{ t.TasaPct }})</span>
+                <span class="value">{{ t.ImporteFmt }}</span>
+            </div>
+            {% endfor %}
+            {% for r in impuestos.Retenciones %}
+            <div class="total-row">
+                <span class="label">Ret. {{ r.ImpuestoDesc }}</span>
+                <span class="value" style="color:#ef4444;">-{{ r.ImporteFmt }}</span>
+            </div>
+            {% endfor %}
+            <div class="total-row grand-total">
+                <span class="label">TOTAL</span>
+                <span class="value">{{ comprobante.TotalFmt }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="total-letras">
+        <strong>Total con letra:</strong> {{ comprobante.TotalLetras }}
+    </div>
+
+    <!-- ═══ SELLOS DIGITALES + QR ═══ -->
+    <div class="stamps-section">
+        <div class="stamps-header">Sellos Digitales y Verificación</div>
+        <div class="stamps-body">
+            <div class="qr-container">
+                {% if qr_image %}
+                <img src="data:image/png;base64,{{ qr_image }}" alt="Código QR de Verificación SAT">
+                {% else %}
+                <span style="font-size:7pt;color:#94a3b8;text-align:center;">QR no disponible</span>
+                {% endif %}
+            </div>
+            <div class="stamps-data">
+                <div class="stamp-group">
+                    <div class="stamp-label">Sello Digital del Emisor</div>
+                    <div class="stamp-value">{{ comprobante.Sello }}</div>
+                </div>
+                <div class="stamp-group">
+                    <div class="stamp-label">Sello Digital del SAT</div>
+                    <div class="stamp-value">{{ timbre.SelloSAT }}</div>
+                </div>
+                <div class="stamp-group">
+                    <div class="stamp-label">Cadena Original del Complemento de Certificación del SAT</div>
+                    <div class="stamp-value cadena">{{ cadena_original }}</div>
+                </div>
+                {% if timbre.FechaTimbradoFmt %}
+                <div class="stamp-group">
+                    <div class="stamp-label">Fecha de Timbrado</div>
+                    <div class="stamp-value">{{ timbre.FechaTimbradoFmt }}</div>
+                </div>
+                {% endif %}
+                {% if timbre.RfcProvCertif %}
+                <div class="stamp-group" style="display:inline-block;margin-right:20px;">
+                    <div class="stamp-label">RFC Proveedor de Certificación</div>
+                    <div class="stamp-value">{{ timbre.RfcProvCertif }}</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ FOOTER ═══ -->
+    <div class="footer">
+        <div class="footer-legend">
+            Este documento es una representación impresa de un CFDI
+        </div>
+        <div class="footer-powered">
+            Generado por CFDI PDF Generator — Verificable en https://verificacfdi.facturaelectronica.sat.gob.mx
+        </div>
+    </div>
+
+</body>
+</html>

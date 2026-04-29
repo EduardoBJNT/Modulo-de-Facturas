@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+cfdi_data.db
+uploads/
+test_output.pdf
+curl_test.pdf

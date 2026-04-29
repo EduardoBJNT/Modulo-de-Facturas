@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cfdi:Comprobante
+    xmlns:cfdi="http://www.sat.gob.mx/cfd/4"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd"
+    Version="4.0"
+    Serie="A"
+    Folio="1042"
+    Fecha="2026-04-25T10:30:00"
+    Sello="dGVzdFNlbGxvRGlnaXRhbEVtaXNvckNGREk0MFRZXE0xMjM0NTY3ODkwQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk="
+    FormaPago="03"
+    NoCertificado="30001000000500003416"
+    Certificado="MIIF+TCCA+GgAwIBAgIUMDAwMDEwMDAwMDA1MDAwMDM0MTYw"
+    SubTotal="25000.00"
+    Descuento="500.00"
+    Moneda="MXN"
+    Total="28520.00"
+    TipoDeComprobante="I"
+    Exportacion="01"
+    MetodoPago="PUE"
+    LugarExpedicion="06600">
+
+    <cfdi:Emisor
+        Rfc="EMP120101ABC"
+        Nombre="EMPRESA CONSTRUCTORA DEMO SA DE CV"
+        RegimenFiscal="601"/>
+
+    <cfdi:Receptor
+        Rfc="XAXX010101000"
+        Nombre="CLIENTE CORPORATIVO DE PRUEBA SA DE CV"
+        DomicilioFiscalReceptor="01000"
+        RegimenFiscalReceptor="601"
+        UsoCFDI="G03"/>
+
+    <cfdi:Conceptos>
+        <cfdi:Concepto
+            ClaveProdServ="80131502"
+            NoIdentificacion="SERV-001"
+            Cantidad="1"
+            ClaveUnidad="E48"
+            Unidad="Servicio"
+            Descripcion="Servicio de consultoría en ingeniería de proyectos — Fase 1: Diseño conceptual y planeación ejecutiva"
+            ValorUnitario="15000.00"
+            Importe="15000.00"
+            Descuento="500.00"
+            ObjetoImp="02">
+            <cfdi:Impuestos>
+                <cfdi:Traslados>
+                    <cfdi:Traslado
+                        Base="14500.00"
+                        Impuesto="002"
+                        TipoFactor="Tasa"
+                        TasaOCuota="0.160000"
+                        Importe="2320.00"/>
+                </cfdi:Traslados>
+            </cfdi:Impuestos>
+        </cfdi:Concepto>
+
+        <cfdi:Concepto
+            ClaveProdServ="43232602"
+            NoIdentificacion="LIC-002"
+            Cantidad="5"
+            ClaveUnidad="E48"
+            Unidad="Servicio"
+            Descripcion="Licencia de software de gestión de proyectos (anual) — Incluye soporte técnico y actualizaciones"
+            ValorUnitario="2000.00"
+            Importe="10000.00"
+            Descuento="0.00"
+            ObjetoImp="02">
+            <cfdi:Impuestos>
+                <cfdi:Traslados>
+                    <cfdi:Traslado
+                        Base="10000.00"
+                        Impuesto="002"
+                        TipoFactor="Tasa"
+                        TasaOCuota="0.160000"
+                        Importe="1600.00"/>
+                </cfdi:Traslados>
+            </cfdi:Impuestos>
+        </cfdi:Concepto>
+    </cfdi:Conceptos>
+
+    <cfdi:Impuestos TotalImpuestosTrasladados="3920.00">
+        <cfdi:Traslados>
+            <cfdi:Traslado
+                Base="24500.00"
+                Impuesto="002"
+                TipoFactor="Tasa"
+                TasaOCuota="0.160000"
+                Importe="3920.00"/>
+        </cfdi:Traslados>
+    </cfdi:Impuestos>
+
+    <cfdi:Complemento>
+        <tfd:TimbreFiscalDigital
+            xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+            xsi:schemaLocation="http://www.sat.gob.mx/TimbreFiscalDigital http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd"
+            Version="1.1"
+            UUID="6BA7B810-9DAD-11D1-80B4-00C04FD430C8"
+            FechaTimbrado="2026-04-25T10:35:22"
+            RfcProvCertif="SPR190613I52"
+            SelloCFD="dGVzdFNlbGxvRGlnaXRhbEVtaXNvckNGREk0MFRZXE0xMjM0NTY3ODkwQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk="
+            NoCertificadoSAT="00001000000504465028"
+            SelloSAT="c2VsbG9TQVRUZXN0VmFsaWRvUGFyYVB1cnBvc2VzRGVQcnVlYmFzWDEyMzQ1Njc4OTBBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWmFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6"/>
+    </cfdi:Complemento>
+
+</cfdi:Comprobante>

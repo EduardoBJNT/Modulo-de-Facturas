@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ERP Global Admin | Facturas Recibidas</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<aside class="sidebar">
+<div class="sidebar-header">
+<div class="sidebar-logo">ERP</div>
+<div><span class="sidebar-brand">Global Admin</span><br><span class="sidebar-status">Core Engine v2.0</span></div>
+</div>
+<nav class="sidebar-nav">
+<div class="nav-item" style="opacity: 0.5; cursor: not-allowed;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg><span>Dashboard</span></div>
+<div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg><span>Facturas Recibidas</span></div>
+<div class="nav-item" style="opacity: 0.5; cursor: not-allowed;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg><span>Compras</span></div>
+<div class="nav-item" style="opacity: 0.5; cursor: not-allowed;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>Proveedores</span></div>
+</nav>
+</aside>
+
+<main class="main">
+<header class="topbar">
+<div class="breadcrumb"><span class="root">Administración</span><span class="sep">/</span><span class="current">Facturas Recibidas</span></div>
+<div class="search-global"><input type="text" placeholder="Búsqueda global..."></div>
+</header>
+
+<div class="content-view">
+<!-- HEADER -->
+<div class="view-header">
+<div><h1 class="view-title">DESCARGA DE FACTURAS RECIBIDAS</h1><p class="view-subtitle">Repositorio permanente de comprobantes fiscales CFDI.</p></div>
+<div class="header-actions">
+<div style="position:relative">
+<button class="btn btn-secondary" id="btnBulkMenu" onclick="document.getElementById('bulkMenu').classList.toggle('hidden')">Operaciones Masivas ▾</button>
+<div id="bulkMenu" class="hidden" style="position:absolute;top:100%;right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:100;min-width:200px;padding:6px 0;margin-top:6px">
+<div style="padding:8px 16px;font-size:13px;cursor:pointer;transition:.15s" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''" onclick="showTab('batch')">Cargar Múltiples XML</div>
+<div style="padding:8px 16px;font-size:13px;cursor:pointer;transition:.15s" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''" onclick="showTab('folder')">Leer Carpeta Local</div>
+</div>
+</div>
+<button class="btn btn-primary" onclick="showTab('single')">+ Cargar XML</button>
+</div>
+</div>
+
+<!-- UPLOAD AREA -->
+<div id="uploadArea">
+<div class="upload-tabs">
+<div class="upload-tab active" data-tab="single" onclick="showTab('single')">📄 Individual</div>
+<div class="upload-tab" data-tab="batch" onclick="showTab('batch')">📁 Múltiples Archivos</div>
+<div class="upload-tab" data-tab="folder" onclick="showTab('folder')">🗂 Leer Carpeta</div>
+</div>
+<div class="upload-pane active" id="paneSingle">
+<div class="drop-zone" id="dropSingle"><div class="drop-icon">📄</div><div class="drop-text">Arrastra un archivo XML aquí</div><div class="drop-hint">o haz clic para seleccionar</div><input type="file" accept=".xml" id="inSingle"></div>
+</div>
+<div class="upload-pane" id="paneBatch">
+<div class="drop-zone" id="dropBatch"><div class="drop-icon">📁</div><div class="drop-text">Arrastra múltiples archivos XML</div><div class="drop-hint">o haz clic para seleccionar varios</div><input type="file" accept=".xml" multiple id="inBatch"></div>
+</div>
+<div class="upload-pane" id="paneFolder">
+<div class="folder-row"><input type="text" id="folderPath" placeholder="/ruta/absoluta/a/carpeta/con/xmls"><button class="btn btn-primary" id="btnFolder">📂 Leer Carpeta</button></div>
+</div>
+</div>
+
+<div id="statusBar" class="status-msg"></div>
+
+<!-- FILTER BAR -->
+<div class="filter-bar" id="filterBar" style="display:none">
+<div class="filter-grid">
+<div class="filter-group"><label>Buscar por Nombre o RFC:</label><input type="text" id="searchBox" placeholder="Ej: ACME o ACM850101..." oninput="applyFilter()"></div>
+<div class="filter-group"><label>Método Pago:</label><select id="filterMetodo" onchange="applyFilter()"><option value="">Todos</option><option value="PUE">PUE</option><option value="PPD">PPD</option></select></div>
+<div class="filter-group"><label>Forma Pago:</label><select id="filterForma" onchange="applyFilter()"><option value="">Todas</option><option value="01">01 - Efectivo</option><option value="03">03 - Transferencia</option><option value="04">04 - Tarjeta Crédito</option><option value="28">28 - Tarjeta Débito</option><option value="99">99 - Por definir</option></select></div>
+<div class="filter-group"><label>Moneda:</label><select id="filterMoneda" onchange="applyFilter()"><option value="">Todas</option><option>MXN</option><option>USD</option><option>EUR</option></select></div>
+<div class="filter-group date-range-wrap"><label>Rango de Fechas:</label>
+<div class="date-range-trigger" id="dateRangeTrigger" onclick="toggleCalendar()"><span id="dateRangeLabel">Todas las fechas</span> 📅</div>
+<div class="calendar-popup" id="calendarPopup">
+<div class="cal-header">
+  <div style="display:flex; gap:5px;">
+    <select id="calMonthSelect" onchange="jumpToMonth()" style="padding:2px; font-size:11px;"></select>
+    <select id="calYearSelect" onchange="jumpToMonth()" style="padding:2px; font-size:11px;"></select>
+  </div>
+  <div style="display:flex; gap:4px;">
+    <button class="cal-nav" onclick="calNav(-1)">‹</button>
+    <button class="cal-nav" onclick="calNav(1)">›</button>
+  </div>
+</div>
+<div class="cal-grid" id="calGrid"></div>
+<div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border); font-size:11px;">
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+    <div><label style="font-size:9px; color:var(--text-muted);">INICIO:</label><input type="date" id="calInpFrom" onchange="syncFromInput()" style="width:100%; padding:4px; font-size:11px;"></div>
+    <div><label style="font-size:9px; color:var(--text-muted);">TÉRMINO:</label><input type="date" id="calInpTo" onchange="syncFromInput()" style="width:100%; padding:4px; font-size:11px;"></div>
+  </div>
+</div>
+<div class="cal-presets">
+<div class="cal-preset" onclick="calPreset('today')">Hoy</div>
+<div class="cal-preset" onclick="calPreset('month')">Este Mes</div>
+<div class="cal-preset" onclick="calPreset('all')">Todo</div>
+</div>
+<div class="cal-actions"><button class="btn btn-sm btn-secondary" onclick="calClear()">Limpiar</button><button class="btn btn-sm btn-primary" onclick="calApply()">Aplicar</button></div>
+</div>
+</div>
+<div class="filter-group"><button class="btn-search" onclick="applyFilter()">🔍 Filtrar</button></div>
+</div>
+</div>
+
+<!-- MAIN SPLIT: TABLE + DETAIL -->
+<div class="layout-split" id="mainArea" style="display:none">
+<div>
+<div class="data-card">
+<div class="table-toolbar"><span class="table-count" id="rowCount"></span><button class="btn btn-sm btn-secondary" onclick="clearAll()">🗑 Limpiar Base de Datos</button></div>
+<div class="table-wrap">
+<table><thead><tr>
+<th data-col="emisor_nombre" class="sortable sorted">Emisor <span class="arr">↓</span></th>
+<th data-col="emisor_rfc" class="sortable">RFC <span class="arr">⇅</span></th>
+<th data-col="fecha" class="sortable">Fecha <span class="arr">⇅</span></th>
+<th data-col="metodo_pago" class="sortable">Método Pago <span class="arr">⇅</span></th>
+<th data-col="total" class="sortable" style="text-align:right">Importe Total <span class="arr">⇅</span></th>
+<th data-col="moneda" class="sortable" style="text-align:center">Moneda <span class="arr">⇅</span></th>
+<th style="text-align:right;cursor:default">Acciones</th>
+</tr></thead><tbody id="tbody"></tbody></table>
+</div>
+<div id="emptyState" class="empty-state hidden"><div class="icon">🔍</div><p>No se encontraron resultados</p></div>
+<div class="pager" id="pager"><span class="pager-info" id="pagerInfo"></span><div class="pager-btns" id="pagerBtns"></div></div>
+</div>
+</div>
+
+<!-- DETAIL SIDEBAR -->
+<div class="detail-panel" id="detailPanel">
+<div class="detail-content" id="detailContent">
+<div style="text-align:center;padding:60px 20px;color:var(--text-muted)"><div style="font-size:40px;margin-bottom:12px;opacity:.4">📋</div><p style="font-size:13px">Selecciona un CFDI de la lista para ver sus detalles</p></div>
+</div>
+</div>
+</div>
+</div>
+</main>
+
+<!-- PREVIEW MODAL -->
+<div class="modal-bg" id="modal">
+<div class="modal"><div class="modal-hdr"><h3 id="modalTitle">Vista Previa CFDI</h3><button class="btn-icon" onclick="closeModal()">✕</button></div>
+<div class="modal-body"><iframe id="previewFrame" title="Vista previa"></iframe></div>
+<div class="modal-foot"><button class="btn btn-primary" id="modalDlBtn">⬇ Descargar PDF</button><button class="btn btn-secondary" onclick="closeModal()">Cerrar</button></div>
+</div></div>
+
+<script>
+/* === STATE === */
+let allRows=[],filtered=[],sortCol='fecha',sortDir=-1,page=0,selectedId=null;
+const PS=15;
+let calMonth,calYear,dateFrom=null,dateTo=null,calSelecting='from';
+
+/* === INITIAL LOAD === */
+window.onload = async () => {
+  showSts('Cargando registros...', 'loading');
+  try {
+    const res = await fetch('/get-records');
+    const data = await res.json();
+    if (data.rows && data.rows.length > 0) {
+      allRows = data.rows;
+      document.getElementById('filterBar').style.display='';
+      document.getElementById('mainArea').style.display='';
+      applyFilter();
+      showSts(allRows.length + ' registros cargados', 'success');
+      setTimeout(hideSts, 3000);
+    } else {
+      hideSts();
+    }
+  } catch (e) {
+    showSts('Error cargando registros: ' + e.message, 'error');
+  }
+};
+
+/* === TABS === */
+function showTab(t){
+  document.querySelectorAll('.upload-tab').forEach(x=>{x.classList.toggle('active',x.dataset.tab===t)});
+  document.querySelectorAll('.upload-pane').forEach(x=>x.classList.remove('active'));
+  document.getElementById('pane'+t.charAt(0).toUpperCase()+t.slice(1)).classList.add('active');
+  document.getElementById('bulkMenu').classList.add('hidden');
+}
+
+/* === DROP ZONES === */
+function setupDrop(zId,iId,cb){
+  const z=document.getElementById(zId),i=document.getElementById(iId);
+  z.onclick=()=>i.click();
+  z.ondragover=e=>{e.preventDefault();z.classList.add('over')};
+  z.ondragleave=()=>z.classList.remove('over');
+  z.ondrop=e=>{e.preventDefault();z.classList.remove('over');cb(e.dataTransfer.files)};
+  i.onchange=()=>{if(i.files.length)cb(i.files)};
+}
+setupDrop('dropSingle','inSingle',f=>upload([f[0]],'/upload-single','xml_file'));
+setupDrop('dropBatch','inBatch',f=>upload(f,'/upload-batch','xml_files'));
+
+async function upload(files,url,field){
+  const totalFiles = field === 'xml_file' ? 1 : Array.from(files).filter(f => f.name.toLowerCase().endsWith('.xml')).length;
+  if (totalFiles === 0) return;
+
+  showSts(`Procesando lote de ${totalFiles} archivos... Por favor espera.`, 'loading');
+  
+  // Deshabilitar botones para evitar re-envíos
+  document.querySelectorAll('.btn').forEach(b => b.disabled = true);
+  
+  const fd=new FormData();
+  if(field==='xml_file')fd.append(field,files[0]);
+  else Array.from(files).forEach(f=>{if(f.name.toLowerCase().endsWith('.xml'))fd.append(field,f)});
+  
+  try{
+    const r=await fetch(url,{method:'POST',body:fd});
+    const j=await r.json();
+    if(j.error){
+      showSts(j.error,'error');
+      return;
+    }
+    addRows(j.rows);
+    showSts(`Éxito: ${j.rows.length} de ${totalFiles} CFDI(s) importados correctamente.`,'success');
+  } catch(e) {
+    showSts('Error en la conexión o procesamiento: ' + e.message, 'error');
+  } finally {
+    document.querySelectorAll('.btn').forEach(b => b.disabled = false);
+  }
+}
+
+document.getElementById('btnFolder').onclick=async ()=>{
+  const p=document.getElementById('folderPath').value.trim();
+  if(!p){showSts('Ingresa una ruta absoluta válida','error');return}
+  
+  showSts('Escaneando y procesando carpeta masiva...','loading');
+  document.getElementById('btnFolder').disabled = true;
+  
+  try {
+    const r = await fetch('/upload-folder',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({folder_path:p})
+    });
+    const j = await r.json();
+    if(j.error){
+      showSts(j.error,'error');
+      return;
+    }
+    addRows(j.rows);
+    showSts(`${j.rows.length} comprobantes importados desde la carpeta.`,'success');
+  } catch(e) {
+    showSts('Error al leer carpeta: ' + e.message, 'error');
+  } finally {
+    document.getElementById('btnFolder').disabled = false;
+  }
+};
+
+/* === DATA === */
+function addRows(newRows){
+  if (!newRows || newRows.length === 0) return;
+  
+  newRows.forEach(nr => {
+    const idx = allRows.findIndex(r => r.id === nr.id);
+    if (idx !== -1) {
+      // Actualizar registro existente
+      allRows[idx] = nr;
+    } else {
+      // Agregar nuevo registro al inicio
+      allRows.unshift(nr);
+    }
+  });
+  
+  applyFilter();
+  document.getElementById('filterBar').style.display = '';
+  document.getElementById('mainArea').style.display = '';
+}
+
+function applyFilter(){
+  const q = (document.getElementById('searchBox').value || '').toLowerCase().trim();
+  const mp = document.getElementById('filterMetodo').value;
+  const fp = document.getElementById('filterForma').value;
+  const mn = document.getElementById('filterMoneda').value;
+  
+  // Función para normalizar: quitar guiones, espacios y otros caracteres no alfanuméricos
+  const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const qNorm = norm(q);
+
+  filtered = allRows.filter(r => {
+    // Campos originales para búsqueda estándar
+    const searchStr = (
+      r.emisor_nombre + ' ' + 
+      r.emisor_rfc + ' ' + 
+      r.receptor_nombre + ' ' + 
+      (r.uuid || '') + ' ' + 
+      r.filename + ' ' + 
+      (r.serie_folio || '')
+    ).toLowerCase();
+
+    // Verificación 1: Coincidencia directa en campos concatenados
+    const matchDirect = q === '' || searchStr.includes(q);
+    
+    // Verificación 2: Coincidencia normalizada (ej: dpt7153 -> DPT-7153)
+    const dataNorm = norm(r.emisor_nombre + r.emisor_rfc + (r.serie_folio || '') + (r.uuid || ''));
+    const matchNorm = qNorm !== '' && dataNorm.includes(qNorm);
+
+    if (q !== '' && !matchDirect && !matchNorm) return false;
+    
+    if (mp && r.metodo_pago !== mp) return false;
+    if (fp && r.forma_pago !== fp) return false;
+    if (mn && r.moneda !== mn) return false;
+    if (dateFrom) { const d = r.fecha.slice(0, 10); if (d < dateFrom) return false; }
+    if (dateTo) { const d = r.fecha.slice(0, 10); if (d > dateTo) return false; }
+    return true;
+  });
+  applySort();
+}
+function applySort(){
+  filtered.sort((a,b)=>{let va=a[sortCol]||'',vb=b[sortCol]||'';if(sortCol==='total'){va=parseFloat(va)||0;vb=parseFloat(vb)||0}return va<vb?-1*sortDir:va>vb?sortDir:0});
+  page=0;render();
+}
+
+/* === RENDER === */
+function render(){
+  const s=page*PS,slice=filtered.slice(s,s+PS),tb=document.getElementById('tbody'),es=document.getElementById('emptyState');
+  document.getElementById('rowCount').textContent=filtered.length+' de '+allRows.length+' CFDI(s)';
+  document.querySelectorAll('th.sortable').forEach(th=>{th.classList.toggle('sorted',th.dataset.col===sortCol);th.querySelector('.arr').textContent=th.dataset.col===sortCol?(sortDir===1?'↑':'↓'):'⇅'});
+  if(!slice.length){tb.innerHTML='';es.classList.remove('hidden');document.getElementById('pager').style.display='none';return}
+  es.classList.add('hidden');document.getElementById('pager').style.display='';
+  tb.innerHTML=slice.map(r=>`<tr data-id="${r.id}" class="${r.id===selectedId?'active':''}" onclick="selectRow('${r.id}')">
+<td><div style="font-weight:600">${esc(r.emisor_nombre)}</div><div class="mono" style="font-size:10px">${esc(r.filename)}</div></td>
+<td class="mono">${esc(r.emisor_rfc)}</td>
+<td style="white-space:nowrap">${esc(r.fecha_fmt||r.fecha)}</td>
+<td><span class="badge ${r.metodo_pago==='PUE'?'badge-ok':'badge-warn'}">${esc(r.metodo_pago)}</span></td>
+<td class="r">${esc(r.total_fmt)}</td>
+<td class="c"><span class="badge badge-info">${esc(r.moneda)}</span></td>
+<td><div class="actions-cell"><button class="btn-icon" title="Ver" onclick="event.stopPropagation();previewRow('${r.id}')">👁</button><button class="btn-icon" title="PDF" onclick="event.stopPropagation();downloadRow('${r.id}')">⬇</button></div></td>
+</tr>`).join('');
+  const tp=Math.ceil(filtered.length/PS);
+  document.getElementById('pagerInfo').textContent=`${s+1}–${Math.min(s+PS,filtered.length)} de ${filtered.length}`;
+  let bh=`<button class="pg-btn" ${page===0?'disabled':''} onclick="goPage(${page-1})">‹</button>`;
+  for(let i=0;i<tp;i++){if(tp>7&&i>1&&i<tp-2&&Math.abs(i-page)>1){if(i===2||i===tp-3)bh+='<span style="color:var(--text-muted);padding:0 4px">…</span>';continue}bh+=`<button class="pg-btn ${i===page?'on':''}" onclick="goPage(${i})">${i+1}</button>`}
+  bh+=`<button class="pg-btn" ${page>=tp-1?'disabled':''} onclick="goPage(${page+1})">›</button>`;
+  document.getElementById('pagerBtns').innerHTML=bh;
+}
+function goPage(p){page=p;render()}
+
+/* === SORT === */
+document.querySelectorAll('th.sortable').forEach(th=>{th.onclick=()=>{if(sortCol===th.dataset.col)sortDir*=-1;else{sortCol=th.dataset.col;sortDir=1}applySort()}});
+
+/* === SELECT ROW → DETAIL === */
+function selectRow(id){
+  selectedId=id;render();
+  const r=allRows.find(x=>x.id===id);if(!r)return;
+  document.getElementById('detailContent').innerHTML=`
+<div class="detail-header"><div class="detail-name">${esc(r.emisor_nombre)}</div><div class="detail-rfc">RFC: ${esc(r.emisor_rfc)}</div></div>
+<div class="detail-stats">
+<div class="detail-stat"><span class="val">${esc(r.total_fmt)}</span><span class="lab">Importe Total (${esc(r.moneda)})</span></div>
+<div class="detail-stat danger"><span class="val">${esc(r.tipo||'Ingreso')}</span><span class="lab">Tipo de Comprobante</span></div>
+</div>
+<div class="detail-info">
+<div style="padding:4px 0 8px;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Datos del Comprobante</div>
+<div class="detail-row"><span class="lbl">Serie/Folio</span><span class="val">${esc(r.serie_folio)}</span></div>
+<div class="detail-row"><span class="lbl">Fecha</span><span class="val">${esc(r.fecha_fmt)}</span></div>
+<div class="detail-row"><span class="lbl">Método Pago</span><span class="val">${esc(r.metodo_pago)} — ${esc(r.metodo_pago_desc)}</span></div>
+<div class="detail-row"><span class="lbl">Forma Pago</span><span class="val">${esc(r.forma_pago)} — ${esc(r.forma_pago_desc)}</span></div>
+<div class="detail-row"><span class="lbl">Moneda</span><span class="val">${esc(r.moneda)}</span></div>
+<div class="detail-row"><span class="lbl">UUID</span><span class="val mono" style="font-size:10px;word-break:break-all">${esc(r.uuid)}</span></div>
+<div style="padding:12px 0 8px;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Receptor</div>
+<div class="detail-row"><span class="lbl">Nombre</span><span class="val">${esc(r.receptor_nombre)}</span></div>
+<div class="detail-row"><span class="lbl">RFC</span><span class="val mono">${esc(r.receptor_rfc)}</span></div>
+</div>
+<div class="detail-actions"><button class="btn btn-secondary btn-sm" onclick="previewRow('${r.id}')">👁 Vista Previa</button><button class="btn btn-primary btn-sm" onclick="downloadRow('${r.id}')">⬇ Descargar PDF</button></div>`;
+}
+
+/* === PREVIEW & DOWNLOAD === */
+let currentPreviewId=null;
+function previewRow(id){
+  currentPreviewId=id;const r=allRows.find(x=>x.id===id);
+  document.getElementById('modalTitle').textContent='Vista Previa — '+(r?r.emisor_nombre:'CFDI');
+  document.getElementById('previewFrame').src='about:blank';
+  document.getElementById('modal').classList.add('show');
+  fetch('/preview/'+id).then(r=>r.json()).then(j=>{if(j.error){alert(j.error);closeModal();return}const f=document.getElementById('previewFrame');const d=f.contentDocument||f.contentWindow.document;d.open();d.write(j.html);d.close()});
+}
+function downloadRow(id){window.open('/download/'+id,'_blank')}
+function closeModal(){document.getElementById('modal').classList.remove('show')}
+document.getElementById('modal').onclick=e=>{if(e.target.id==='modal')closeModal()};
+document.getElementById('modalDlBtn').onclick=()=>{if(currentPreviewId)downloadRow(currentPreviewId)};
+
+/* === CALENDAR DATE PICKER === */
+const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const DIAS=['Lu','Ma','Mi','Ju','Vi','Sa','Do'];
+function initCal(){
+  const n=new Date();calMonth=n.getMonth();calYear=n.getFullYear();
+  // Llenar selects de mes y año
+  const ms=document.getElementById('calMonthSelect');
+  ms.innerHTML = MESES.map((m,i)=>`<option value="${i}">${m}</option>`).join('');
+  const ys=document.getElementById('calYearSelect');
+  let yh = '';
+  for(let y=calYear-5; y<=calYear+1; y++) yh+=`<option value="${y}" ${y===calYear?'selected':''}>${y}</option>`;
+  ys.innerHTML = yh;
+}
+initCal();
+function toggleCalendar(){const p=document.getElementById('calendarPopup');if(p.classList.contains('show')){p.classList.remove('show')}else{renderCal();p.classList.add('show')}}
+function calNav(d){
+  calMonth+=d;
+  if(calMonth<0){calMonth=11;calYear--}
+  if(calMonth>11){calMonth=0;calYear++}
+  renderCal();
+}
+function jumpToMonth(){
+  calMonth = parseInt(document.getElementById('calMonthSelect').value);
+  calYear = parseInt(document.getElementById('calYearSelect').value);
+  renderCal();
+}
+function renderCal(){
+  document.getElementById('calMonthSelect').value = calMonth;
+  document.getElementById('calYearSelect').value = calYear;
+  
+  const g=document.getElementById('calGrid');let h=DIAS.map(d=>`<div class="cal-day-label">${d}</div>`).join('');
+  const first=new Date(calYear,calMonth,1);const last=new Date(calYear,calMonth+1,0);
+  let startDay=(first.getDay()+6)%7;const today=new Date().toISOString().slice(0,10);
+  const prevLast=new Date(calYear,calMonth,0).getDate();
+  for(let i=startDay-1;i>=0;i--)h+=`<div class="cal-day other">${prevLast-i}</div>`;
+  for(let d=1;d<=last.getDate();d++){
+    const ds=`${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    let cls='cal-day';
+    if(ds===today)cls+=' today';
+    if(ds===dateFrom||ds===dateTo)cls+=' selected';
+    else if(dateFrom&&dateTo&&ds>dateFrom&&ds<dateTo)cls+=' in-range';
+    h+=`<div class="${cls}" data-date="${ds}" onclick="calPick('${ds}')">${d}</div>`;
+  }
+  const cells=startDay+last.getDate();const rem=7-(cells%7);
+  if(rem<7)for(let i=1;i<=rem;i++)h+=`<div class="cal-day other">${i}</div>`;
+  g.innerHTML=h;
+  
+  // Sincronizar inputs
+  document.getElementById('calInpFrom').value = dateFrom || '';
+  document.getElementById('calInpTo').value = dateTo || '';
+}
+function calPick(ds){
+  if(!dateFrom||dateTo||ds<dateFrom){dateFrom=ds;dateTo=null}
+  else{dateTo=ds}
+  renderCal();
+}
+function syncFromInput(){
+  dateFrom = document.getElementById('calInpFrom').value || null;
+  dateTo = document.getElementById('calInpTo').value || null;
+  renderCal();
+}
+function calPreset(p){
+  const t=new Date(),fmt=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  if(p==='today'){dateFrom=dateTo=fmt(t)}
+  else if(p==='month'){
+    calMonth = t.getMonth(); calYear = t.getFullYear();
+    dateFrom=`${calYear}-${String(calMonth+1).padStart(2,'0')}-01`;
+    dateTo=fmt(new Date(calYear, calMonth + 1, 0));
+  }
+  else if(p==='all'){dateFrom=null;dateTo=null}
+  renderCal(); updateDateLabel();
+}
+function calApply(){document.getElementById('calendarPopup').classList.remove('show');updateDateLabel();applyFilter()}
+function calClear(){dateFrom=null;dateTo=null;renderCal();updateDateLabel();applyFilter()}
+function updateDateLabel(){
+  const lbl=document.getElementById('dateRangeLabel');
+  if(!dateFrom&&!dateTo)lbl.textContent='Todas las fechas';
+  else if(dateFrom&&!dateTo)lbl.textContent='Desde '+dateFrom;
+  else lbl.textContent=dateFrom+' → '+dateTo;
+}
+document.addEventListener('click',e=>{if(!e.target.closest('.date-range-wrap'))document.getElementById('calendarPopup').classList.remove('show')});
+
+/* === CLEAR === */
+function clearAll(){if(!confirm('¿Limpiar permanentemente todos los registros de la base de datos?'))return;fetch('/clear',{method:'POST'});allRows=[];filtered=[];selectedId=null;render();document.getElementById('filterBar').style.display='none';document.getElementById('mainArea').style.display='none';document.getElementById('detailContent').innerHTML='<div style="text-align:center;padding:60px 20px;color:var(--text-muted)"><div style="font-size:40px;margin-bottom:12px;opacity:.4">📋</div><p>Selecciona un CFDI</p></div>';showSts('Base de datos limpiada','success')}
+
+/* === UTILS === */
+function showSts(m,t){const s=document.getElementById('statusBar');s.className='status-msg show '+t;s.innerHTML=(t==='loading'?'<div class="spin"></div>':'')+m}
+function hideSts(){document.getElementById('statusBar').classList.remove('show')}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+</script>
+</body>
+</html>
