@@ -21,7 +21,12 @@
 
 <main class="main">
 <header class="topbar">
+<div class="topbar-left">
+<button class="btn-toggle" onclick="toggleSidebar()" title="Alternar Menú">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+</button>
 <div class="breadcrumb"><span class="root">Administración</span><span class="sep">/</span><span class="current">Facturas Recibidas</span></div>
+</div>
 <div class="search-global"><input type="text" placeholder="Búsqueda global..."></div>
 </header>
 
@@ -146,6 +151,11 @@ let calMonth,calYear,dateFrom=null,dateTo=null,calSelecting='from';
 
 /* === INITIAL LOAD === */
 window.onload = async () => {
+  // Restore sidebar state
+  if (localStorage.getItem('sidebar-collapsed') === 'true') {
+    document.querySelector('.sidebar').classList.add('collapsed');
+  }
+
   showSts('Cargando registros...', 'loading');
   try {
     const res = await fetch('/get-records');
@@ -164,6 +174,12 @@ window.onload = async () => {
     showSts('Error cargando registros: ' + e.message, 'error');
   }
 };
+
+function toggleSidebar() {
+  const sb = document.querySelector('.sidebar');
+  sb.classList.toggle('collapsed');
+  localStorage.setItem('sidebar-collapsed', sb.classList.contains('collapsed'));
+}
 
 /* === TABS === */
 function showTab(t){
@@ -319,7 +335,7 @@ function render(){
 <td><span class="badge ${r.metodo_pago==='PUE'?'badge-ok':'badge-warn'}">${esc(r.metodo_pago)}</span></td>
 <td class="r">${esc(r.total_fmt)}</td>
 <td class="c"><span class="badge badge-info">${esc(r.moneda)}</span></td>
-<td><div class="actions-cell"><button class="btn-icon" title="Ver" onclick="event.stopPropagation();previewRow('${r.id}')">👁</button><button class="btn-icon" title="PDF" onclick="event.stopPropagation();downloadRow('${r.id}')">⬇</button></div></td>
+<td><div class="actions-cell"><button class="btn-icon" title="Ver" onclick="event.stopPropagation();previewRow('${r.id}')">👁</button><button class="btn-icon" title="Imprimir" onclick="event.stopPropagation();printRow('${r.id}')">🖨️</button><button class="btn-icon" title="PDF" onclick="event.stopPropagation();downloadRow('${r.id}')">⬇</button></div></td>
 </tr>`).join('');
   const tp=Math.ceil(filtered.length/PS);
   document.getElementById('pagerInfo').textContent=`${s+1}–${Math.min(s+PS,filtered.length)} de ${filtered.length}`;
@@ -355,7 +371,7 @@ function selectRow(id){
 <div class="detail-row"><span class="lbl">Nombre</span><span class="val">${esc(r.receptor_nombre)}</span></div>
 <div class="detail-row"><span class="lbl">RFC</span><span class="val mono">${esc(r.receptor_rfc)}</span></div>
 </div>
-<div class="detail-actions"><button class="btn btn-secondary btn-sm" onclick="previewRow('${r.id}')">👁 Vista Previa</button><button class="btn btn-primary btn-sm" onclick="downloadRow('${r.id}')">⬇ Descargar PDF</button></div>`;
+<div class="detail-actions"><button class="btn btn-secondary btn-sm" onclick="previewRow('${r.id}')">👁 Ver</button><button class="btn btn-secondary btn-sm" style="background:#f1f5f9;border-color:#cbd5e1" onclick="printRow('${r.id}')">🖨️ Imprimir</button><button class="btn btn-primary btn-sm" onclick="downloadRow('${r.id}')">⬇ PDF</button></div>`;
 }
 
 /* === PREVIEW & DOWNLOAD === */
@@ -368,6 +384,23 @@ function previewRow(id){
   fetch('/preview/'+id).then(r=>r.json()).then(j=>{if(j.error){alert(j.error);closeModal();return}const f=document.getElementById('previewFrame');const d=f.contentDocument||f.contentWindow.document;d.open();d.write(j.html);d.close()});
 }
 function downloadRow(id){window.open('/download/'+id,'_blank')}
+function printRow(id){
+  showSts('Preparando impresión...', 'loading');
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  document.body.appendChild(iframe);
+  fetch('/preview/'+id).then(r=>r.json()).then(j=>{
+    if(j.error){showSts(j.error,'error');document.body.removeChild(iframe);return}
+    const d=iframe.contentDocument||iframe.contentWindow.document;
+    d.open();d.write(j.html);d.close();
+    iframe.contentWindow.focus();
+    setTimeout(()=>{
+      iframe.contentWindow.print();
+      document.body.removeChild(iframe);
+      hideSts();
+    }, 500);
+  }).catch(e=>{showSts('Error: '+e.message,'error');document.body.removeChild(iframe)});
+}
 function closeModal(){document.getElementById('modal').classList.remove('show')}
 document.getElementById('modal').onclick=e=>{if(e.target.id==='modal')closeModal()};
 document.getElementById('modalDlBtn').onclick=()=>{if(currentPreviewId)downloadRow(currentPreviewId)};

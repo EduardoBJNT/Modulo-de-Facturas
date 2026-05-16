@@ -21,7 +21,7 @@ app.config['MAX_CONTENT_LENGTH'] = 256 * 1024 * 1024  # 256 MB for batch
 DB_PATH = os.path.join(os.path.dirname(__file__), 'cfdi_data.db')
 
 def init_db():
-    """Inicializa la base de datos SQLite."""
+    """Inicializa la base de datos SQLite y realiza limpieza de duplicados."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -48,9 +48,32 @@ def init_db():
             errors TEXT,
             warnings TEXT,
             xml_content BLOB,
-            parsed_json TEXT
+            parsed_json TEXT,
+            tipo_comprobante TEXT,
+            lugar_expedicion TEXT,
+            regimen_fiscal_emisor TEXT,
+            subtotal REAL,
+            descuento REAL,
+            iva_16 REAL,
+            iva_8 REAL,
+            iva_0 REAL,
+            iva_ret REAL,
+            isr_ret REAL,
+            ieps REAL
         )
     ''')
+    
+    # Limpieza de duplicados por UUID (mantener el último id para cada UUID si hay varios)
+    try:
+        cursor.execute('''
+            DELETE FROM cfdi_records 
+            WHERE id NOT IN (
+                SELECT MAX(id) FROM cfdi_records GROUP BY uuid
+            ) AND uuid IS NOT NULL AND uuid != ''
+        ''')
+    except:
+        pass
+        
     conn.commit()
     conn.close()
 
@@ -68,7 +91,8 @@ def generate_qr_base64(url):
     buf.seek(0)
     return base64.b64encode(buf.read()).decode('utf-8')
 
-def render_cfdi_pdf(cfdi_data):
+def get_cfdi_html(cfdi_data):
+    """Genera solo el HTML para previsualización o impresión (RÁPIDO)."""
     qr_image = generate_qr_base64(cfdi_data.get('qr_url', ''))
     tpl_dir = os.path.join(os.path.dirname(__file__), 'templates')
     env = Environment(loader=FileSystemLoader(tpl_dir))
@@ -84,8 +108,11 @@ def render_cfdi_pdf(cfdi_data):
         qr_url=cfdi_data.get('qr_url', ''),
         qr_image=qr_image,
     )
-    pdf_bytes = HTML(string=html_content).write_pdf()
-    return pdf_bytes, html_content
+    return html_content
+
+def generate_pdf_from_html(html_content):
+    """Convierte HTML a PDF usando WeasyPrint (PESADO)."""
+    return HTML(string=html_content).write_pdf()
 
 def parse_and_save(xml_bytes, filename, external_conn=None):
     """
@@ -93,12 +120,17 @@ def parse_and_save(xml_bytes, filename, external_conn=None):
     Si se pasa external_conn, no hace commit ni cierra para permitir transacciones masivas.
     """
     try:
+        import hashlib
         data = parse_cfdi(xml_bytes)
         validation = validate_cfdi_40(data)
         res = data.get('resumen_fiscal', {})
         
-        fiscal_uuid = data['timbre'].get('UUID', '')
-        entry_id = fiscal_uuid if fiscal_uuid else str(uuid.uuid4())
+        fiscal_uuid = data['timbre'].get('UUID', '').upper()
+        if fiscal_uuid:
+            entry_id = fiscal_uuid
+        else:
+            # Si no hay UUID, usamos un hash del contenido para evitar duplicados del mismo archivo
+            entry_id = "HASH_" + hashlib.md5(xml_bytes).hexdigest()
         
         row = {
             'id': entry_id,
@@ -274,7 +306,8 @@ def preview_entry(entry_id):
     parsed_json, filename, emisor_nombre, emisor_rfc, receptor_nombre, receptor_rfc, fecha, fecha_fmt, metodo_pago, metodo_pago_desc, forma_pago, forma_pago_desc, total, total_fmt, moneda, uuid, serie_folio, tipo, valid, errors, warnings = res
     data = json.loads(parsed_json)
     
-    _, html = render_cfdi_pdf(data)
+    # Solo generamos el HTML, mucho más rápido que generar el PDF
+    html = get_cfdi_html(data)
     
     row = {
         'id': entry_id, 'filename': filename, 'emisor_nombre': emisor_nombre, 'emisor_rfc': emisor_rfc,
@@ -303,7 +336,8 @@ def download_entry(entry_id):
     parsed_json, serie_folio, uuid_val = res
     data = json.loads(parsed_json)
     
-    pdf_bytes, _ = render_cfdi_pdf(data)
+    html = get_cfdi_html(data)
+    pdf_bytes = generate_pdf_from_html(html)
     fname = f"CFDI_{serie_folio}_{uuid_val[:8] if uuid_val else entry_id}.pdf"
     return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf',
                      as_attachment=True, download_name=fname)
