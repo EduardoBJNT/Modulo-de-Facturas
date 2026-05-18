@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: cfdi_pdf_generator
+    ports:
+      - "8080:8080"
+    environment:
+      - FLASK_ENV=production
+      # Mapeamos la base de datos a una carpeta dentro del volumen persistente
+      - DB_PATH=/app/data/cfdi_data.db
+    volumes:
+      - cfdi_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  cfdi_data:

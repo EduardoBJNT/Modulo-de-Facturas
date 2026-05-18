@@ -18,10 +18,13 @@ from cfdi_parser import parse_cfdi, validate_cfdi_40
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['MAX_CONTENT_LENGTH'] = 256 * 1024 * 1024  # 256 MB for batch
-DB_PATH = os.path.join(os.path.dirname(__file__), 'cfdi_data.db')
+DB_PATH = os.getenv('DB_PATH', os.path.join(os.path.dirname(__file__), 'cfdi_data.db'))
 
 def init_db():
     """Inicializa la base de datos SQLite y realiza limpieza de duplicados."""
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
