@@ -1,0 +1,26 @@
+name: CI/CD - Deploy to Fly.io
+
+on:
+  push:
+    branches:
+      - main # Se ejecuta automáticamente al hacer push a la rama main
+
+jobs:
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v3
+
+      - name: Instalar Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Desplegar en Producción
+        # El comando 'flyctl deploy' lee el Dockerfile y el fly.toml, empaqueta la app y reinicia el contenedor en la nube.
+        run: flyctl deploy --remote-only
+        env:
+          # Para que esto funcione, debes ir a Configuración de tu repo en GitHub > Secrets and Variables > Actions
+          # y agregar un "New repository secret" llamado FLY_API_TOKEN.
+          # (Puedes obtener tu token en la terminal corriendo 'fly auth token').
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
