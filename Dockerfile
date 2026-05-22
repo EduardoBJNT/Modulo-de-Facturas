@@ -36,5 +36,5 @@ RUN mkdir -p uploads static templates
 # Puerto expuesto (estándar para la nube)
 EXPOSE 8080
 
-# Comando para ejecutar con Gunicorn en producción
-CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:8080", "wsgi:app"]
+# Comando para ejecutar con Gunicorn en producción, leyendo dinámicamente el PORT de Render
+CMD ["sh", "-c", "gunicorn --workers 4 --bind 0.0.0.0:${PORT:-8080} wsgi:app"]

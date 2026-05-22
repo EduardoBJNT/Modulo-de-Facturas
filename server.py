@@ -18,15 +18,26 @@ from cfdi_parser import parse_cfdi, validate_cfdi_40
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['MAX_CONTENT_LENGTH'] = 256 * 1024 * 1024  # 256 MB for batch
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    return response
 DB_PATH = os.getenv('DB_PATH', os.path.join(os.path.dirname(__file__), 'cfdi_data.db'))
+
+def get_db_connection():
+    return sqlite3.connect(DB_PATH)
 
 def init_db():
     """Inicializa la base de datos SQLite y realiza limpieza de duplicados."""
     db_dir = os.path.dirname(DB_PATH)
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS cfdi_records (
             id TEXT PRIMARY KEY,
@@ -65,8 +76,7 @@ def init_db():
             ieps REAL
         )
     ''')
-    
-    # Limpieza de duplicados por UUID (mantener el último id para cada UUID si hay varios)
+
     try:
         cursor.execute('''
             DELETE FROM cfdi_records 
@@ -195,7 +205,7 @@ def parse_and_save(xml_bytes, filename, external_conn=None):
         if external_conn:
             external_conn.execute(sql, params)
         else:
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection()
             conn.execute(sql, params)
             conn.commit()
             conn.close()
@@ -215,7 +225,7 @@ def index():
 @app.route('/get-records')
 def get_records():
     """Obtiene todos los registros guardados."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM cfdi_records ORDER BY fecha DESC')
@@ -252,7 +262,7 @@ def upload_batch():
         return jsonify({'error': 'No se proporcionaron archivos'}), 400
     
     rows = []
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     try:
         # Iniciamos transacción masiva
         with conn:
@@ -261,6 +271,7 @@ def upload_batch():
                     # Pasamos la conexión para que no haga commit individual
                     row = parse_and_save(f.read(), f.filename, external_conn=conn)
                     if row: rows.append(row)
+                    
     except Exception as e:
         return jsonify({'error': f'Error en procesamiento masivo: {str(e)}'}), 500
     finally:
@@ -276,7 +287,7 @@ def upload_folder():
         return jsonify({'error': f'La carpeta no existe o no es accesible: {folder_path}'}), 400
     
     rows = []
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     try:
         filenames = [f for f in sorted(os.listdir(folder_path)) if f.lower().endswith('.xml')]
         with conn:
@@ -288,6 +299,7 @@ def upload_folder():
                         if row: rows.append(row)
                 except Exception as e:
                     print(f"Error leyendo {fname}: {e}")
+                    
     except Exception as e:
         return jsonify({'error': f'Error procesando carpeta: {str(e)}'}), 500
     finally:
@@ -297,7 +309,7 @@ def upload_folder():
 
 @app.route('/preview/<entry_id>')
 def preview_entry(entry_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT parsed_json, filename, emisor_nombre, emisor_rfc, receptor_nombre, receptor_rfc, fecha, fecha_fmt, metodo_pago, metodo_pago_desc, forma_pago, forma_pago_desc, total, total_fmt, moneda, uuid, serie_folio, tipo, valid, errors, warnings FROM cfdi_records WHERE id = ?', (entry_id,))
     res = cursor.fetchone()
@@ -327,7 +339,7 @@ def preview_entry(entry_id):
 
 @app.route('/download/<entry_id>')
 def download_entry(entry_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT parsed_json, serie_folio, uuid FROM cfdi_records WHERE id = ?', (entry_id,))
     res = cursor.fetchone()
@@ -347,7 +359,7 @@ def download_entry(entry_id):
 
 @app.route('/clear', methods=['POST'])
 def clear_store():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM cfdi_records')
     conn.commit()
