@@ -1,0 +1,31 @@
+#!/bin/bash
+set -euo pipefail
+
+APP_BUNDLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_DIR="$(cd "$APP_BUNDLE_DIR/../.." && pwd)"
+PORT="${PORT:-5050}"
+URL="http://127.0.0.1:${PORT}"
+
+cd "$PROJECT_DIR"
+
+PYTHON_BIN="python3"
+if [ -x "$PROJECT_DIR/.venv/bin/python3" ]; then
+  PYTHON_BIN="$PROJECT_DIR/.venv/bin/python3"
+fi
+
+if ! lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  nohup "$PYTHON_BIN" server.py >/tmp/app_facturas_recibidas.log 2>&1 &
+  for _ in {1..45}; do
+    if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+fi
+
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  open "$URL"
+else
+  osascript -e 'display dialog "No se pudo iniciar App Facturas Recibidas. Revisa /tmp/app_facturas_recibidas.log" buttons {"OK"} default button "OK"'
+  exit 1
+fi

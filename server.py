@@ -1,7 +1,7 @@
 """
-Servidor Flask para CFDI PDF Generator — Versión con PERSISTENCIA (SQLite).
-Soporta: Individual, Múltiples archivos, y Lectura de carpeta.
-Mantiene los datos guardados en una base de datos local.
+Servidor Flask para App Facturas Recibidas.
+Persistencia histórica en SQLite.
+Soporta: individual, múltiples archivos y lectura de carpeta.
 """
 
 import os
@@ -240,8 +240,32 @@ def get_records():
         # No enviar el contenido XML pesado en la lista principal
         if 'xml_content' in r: del r['xml_content']
         if 'parsed_json' in r: del r['parsed_json']
-        
+    
     return jsonify({'rows': rows})
+
+@app.route('/api/facturas-recibidas')
+def api_facturas_recibidas():
+    return get_records()
+
+@app.route('/api/facturas-recibidas/<entry_id>')
+def api_factura_recibida(entry_id):
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM cfdi_records WHERE id = ?', (entry_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({'error': 'CFDI no encontrado'}), 404
+
+    data = dict(row)
+    data['errors'] = json.loads(data['errors'])
+    data['warnings'] = json.loads(data['warnings'])
+    data['valid'] = bool(data['valid'])
+    data.pop('xml_content', None)
+    data.pop('parsed_json', None)
+    return jsonify({'row': data})
 
 @app.route('/upload-single', methods=['POST'])
 def upload_single():
@@ -368,7 +392,7 @@ def clear_store():
 
 if __name__ == '__main__':
     print("\n" + "=" * 60)
-    print("   CFDI PDF Generator — PERSISTENTE")
+    print("   App Facturas Recibidas")
     print("   http://localhost:5050")
     print("=" * 60 + "\n")
     app.run(host='0.0.0.0', port=5050, debug=True)
