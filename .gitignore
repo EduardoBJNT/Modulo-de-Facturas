@@ -1,13 +1,7 @@
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
+cfdi_data.db
+data/
+.venv312/
 .DS_Store
 .logs/
-.venv/
-cfdi_data.db
-uploads/
-test_output.pdf
-curl_test.pdf
-STACK_LOCAL_VPS.md
-run-local.sh
-render.yaml

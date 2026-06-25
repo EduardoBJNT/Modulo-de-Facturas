@@ -12,7 +12,10 @@
 <div><span class="sidebar-brand">App Facturas Recibidas</span><br><span class="sidebar-status">Repositorio histórico</span></div>
 </div>
 <nav class="sidebar-nav">
-<div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg><span>Facturas Recibidas</span></div>
+{% for key, meta in companies.items() %}
+<div class="nav-item {% if key == selected_company %}active{% endif %}" onclick="setCompany('{{ key }}')">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg><span>{{ meta.label }}</span></div>
+{% endfor %}
 </nav>
 </aside>
 
@@ -22,7 +25,7 @@
 <button class="btn-toggle" onclick="toggleSidebar()" title="Alternar Menú">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
 </button>
-<div class="breadcrumb"><span class="root">App Facturas Recibidas</span><span class="sep">/</span><span class="current">Histórico</span></div>
+<div class="breadcrumb"><span class="root">App Facturas Recibidas</span><span class="sep">/</span><span class="current">{{ company.label }}</span></div>
 </div>
 <div class="search-global"><input type="text" placeholder="Búsqueda global..."></div>
 </header>
@@ -30,7 +33,7 @@
 <div class="content-view">
 <!-- HEADER -->
 <div class="view-header">
-<div><h1 class="view-title">FACTURAS RECIBIDAS</h1><p class="view-subtitle">Repositorio histórico y persistente de comprobantes fiscales CFDI.</p></div>
+<div><h1 class="view-title">FACTURAS RECIBIDAS</h1><p class="view-subtitle">Repositorio histórico y persistente de comprobantes fiscales CFDI.</p><div class="company-badge">{{ company.label }}</div></div>
 <div class="header-actions">
 <div style="position:relative">
 <button class="btn btn-secondary" id="btnBulkMenu" onclick="document.getElementById('bulkMenu').classList.toggle('hidden')">Operaciones Masivas ▾</button>
@@ -59,6 +62,32 @@
 <div class="upload-pane" id="paneFolder">
 <div class="folder-row"><input type="text" id="folderPath" placeholder="/ruta/absoluta/a/carpeta/con/xmls"><button class="btn btn-primary" id="btnFolder">📂 Leer Carpeta</button></div>
 </div>
+</div>
+
+<div class="sat-card">
+<div class="sat-head">
+<div>
+<div class="sat-title">Descarga directa SAT</div>
+<div class="sat-subtitle">Configura por empresa los archivos `.cer`/`.key` y descarga facturas recibidas sin cargar XML manualmente.</div>
+</div>
+<div class="sat-pill" id="satConfigPill">Sin configurar</div>
+</div>
+<div class="sat-grid">
+<div class="sat-field"><label>RFC receptor</label><input type="text" id="satRfc" placeholder="RFC de la empresa"></div>
+<div class="sat-field"><label>Contraseña .key</label><input type="password" id="satPassword" placeholder="Contraseña de la FIEL"></div>
+<div class="sat-field"><label>Archivo .cer</label><input type="file" id="satCer" accept=".cer"></div>
+<div class="sat-field"><label>Archivo .key</label><input type="file" id="satKey" accept=".key"></div>
+<div class="sat-field"><label>Desde</label><input type="date" id="satDateFrom"></div>
+<div class="sat-field"><label>Hasta</label><input type="date" id="satDateTo"></div>
+<div class="sat-field"><label>Tipo de consulta</label><select id="satRequestType"><option value="received">Recibidas</option><option value="issued">Emitidas</option></select></div>
+<div class="sat-field"><label>Empresa activa</label><input type="text" value="{{ company.label }}" disabled></div>
+</div>
+<div class="sat-actions">
+<button class="btn btn-secondary" id="btnSatSave">Guardar credenciales</button>
+<button class="btn btn-primary" id="btnSatDownload">Descargar del SAT</button>
+<button class="btn btn-secondary" id="btnSatReload">Refrescar estado</button>
+</div>
+<div class="sat-note" id="satConfigMeta"></div>
 </div>
 
 <div id="statusBar" class="status-msg"></div>
@@ -142,20 +171,62 @@
 
 <script>
 /* === STATE === */
+const CURRENT_COMPANY='{{ selected_company }}';
+const COMPANY_LABEL='{{ company.label }}';
+const COMPANY_OPTIONS={{ companies|tojson }};
+const COMPANY_RFC_HINTS={bajanet:'BAJ100903KC6',iamet:'IAM170712NL7'};
 let allRows=[],filtered=[],sortCol='fecha',sortDir=-1,page=0,selectedId=null;
 const PS=15;
 let calMonth,calYear,dateFrom=null,dateTo=null,calSelecting='from';
+let satConfigState={configured:false};
+
+function setCompany(companyKey){
+  if (!COMPANY_OPTIONS[companyKey]) return;
+  window.location.href = '/empresa/' + companyKey;
+}
+
+function companyQuery(){
+  return '?company=' + encodeURIComponent(CURRENT_COMPANY);
+}
+
+function withCompany(path){
+  return path + (path.includes('?') ? '&' : '?') + 'company=' + encodeURIComponent(CURRENT_COMPANY);
+}
+
+function groupRowsByCompany(rows){
+  return (rows || []).reduce((acc, row) => {
+    const key = row.company_key || CURRENT_COMPANY;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(row);
+    return acc;
+  }, {});
+}
+
+function companyLabel(companyKey){
+  return (COMPANY_OPTIONS[companyKey] && COMPANY_OPTIONS[companyKey].label) ? COMPANY_OPTIONS[companyKey].label : companyKey;
+}
+
+function summarizeCompanies(grouped){
+  return Object.keys(grouped).map(key => `${companyLabel(key)}: ${grouped[key].length}`).join(', ');
+}
 
 /* === INITIAL LOAD === */
-window.onload = async () => {
-  // Restore sidebar state
-  if (localStorage.getItem('sidebar-collapsed') === 'true') {
-    document.querySelector('.sidebar').classList.add('collapsed');
+function initSatDefaults(){
+  const today = new Date();
+  const from = new Date(today);
+  from.setDate(from.getDate() - 30);
+  document.getElementById('satDateFrom').value = from.toISOString().slice(0, 10);
+  document.getElementById('satDateTo').value = today.toISOString().slice(0, 10);
+  const rfcInput = document.getElementById('satRfc');
+  if (!rfcInput.value.trim() && COMPANY_RFC_HINTS[CURRENT_COMPANY]) {
+    rfcInput.value = COMPANY_RFC_HINTS[CURRENT_COMPANY];
   }
+}
 
+async function loadRecords(){
   showSts('Cargando registros...', 'loading');
   try {
-    const res = await fetch('/get-records');
+    const res = await fetch(withCompany('/get-records'));
     const data = await res.json();
     if (data.rows && data.rows.length > 0) {
       allRows = data.rows;
@@ -165,11 +236,55 @@ window.onload = async () => {
       showSts(allRows.length + ' registros cargados', 'success');
       setTimeout(hideSts, 3000);
     } else {
+      allRows = [];
+      filtered = [];
+      render();
       hideSts();
     }
   } catch (e) {
     showSts('Error cargando registros: ' + e.message, 'error');
   }
+}
+
+function setSatPill(state, text){
+  const pill=document.getElementById('satConfigPill');
+  pill.className='sat-pill ' + (state || '');
+  pill.textContent=text;
+}
+
+async function loadSatConfig(){
+  try {
+    const res = await fetch(withCompany('/api/sat/config'));
+    const data = await res.json();
+    satConfigState = data || {configured:false};
+    document.getElementById('satRfc').value = data.rfc_receptor || COMPANY_RFC_HINTS[CURRENT_COMPANY] || '';
+    const note = document.getElementById('satConfigMeta');
+    if (data.configured) {
+      if (data.auth_valid) {
+        setSatPill('ok', 'Configurado');
+        note.textContent = `RFC: ${data.rfc_receptor || '-'} · CER: ${data.cer_filename || '-'} · KEY: ${data.key_filename || '-'} · Actualizado: ${data.updated_at || '-'}`;
+      } else {
+        setSatPill('err', 'Config inválida');
+        note.textContent = `RFC: ${data.rfc_receptor || '-'} · CER: ${data.cer_filename || '-'} · KEY: ${data.key_filename || '-'} · Error: ${data.auth_error || 'No validó la FIEL'}`;
+      }
+    } else {
+      setSatPill('warn', 'Sin configurar');
+      note.textContent = 'Carga una vez los archivos .cer y .key por empresa. Las credenciales quedan cifradas localmente.';
+    }
+    document.getElementById('btnSatDownload').disabled = !!data.configured && !data.auth_valid;
+  } catch (e) {
+    setSatPill('err', 'Sin estado');
+    document.getElementById('satConfigMeta').textContent = 'No fue posible leer la configuración SAT: ' + e.message;
+  }
+}
+
+window.onload = async () => {
+  if (localStorage.getItem('sidebar-collapsed') === 'true') {
+    document.querySelector('.sidebar').classList.add('collapsed');
+  }
+  initSatDefaults();
+  await loadRecords();
+  await loadSatConfig();
 };
 
 function toggleSidebar() {
@@ -208,6 +323,7 @@ async function upload(files,url,field){
   document.querySelectorAll('.btn').forEach(b => b.disabled = true);
   
   const fd=new FormData();
+  fd.append('company', CURRENT_COMPANY);
   if(field==='xml_file')fd.append(field,files[0]);
   else Array.from(files).forEach(f=>{if(f.name.toLowerCase().endsWith('.xml'))fd.append(field,f)});
   
@@ -218,8 +334,22 @@ async function upload(files,url,field){
       showSts(j.error,'error');
       return;
     }
-    addRows(j.rows);
-    showSts(`Éxito: ${j.rows.length} de ${totalFiles} CFDI(s) importados correctamente.`,'success');
+    const grouped = groupRowsByCompany(j.rows);
+    const companies = Object.keys(grouped).filter(k => grouped[k].length);
+    const currentRows = grouped[CURRENT_COMPANY] || [];
+
+    if (companies.length === 1 && companies[0] !== CURRENT_COMPANY) {
+      showSts(`Los CFDI se detectaron para ${companyLabel(companies[0])}. Redirigiendo...`, 'success');
+      setTimeout(() => window.location.href = '/empresa/' + companies[0], 500);
+      return;
+    }
+
+    if (currentRows.length) addRows(currentRows);
+    if (companies.length > 1) {
+      showSts(`Importación mixta: ${summarizeCompanies(grouped)}.`, 'success');
+    } else {
+      showSts(`Éxito: ${currentRows.length} de ${totalFiles} CFDI(s) importados correctamente en ${COMPANY_LABEL}.`,'success');
+    }
   } catch(e) {
     showSts('Error en la conexión o procesamiento: ' + e.message, 'error');
   } finally {
@@ -238,21 +368,133 @@ document.getElementById('btnFolder').onclick=async ()=>{
     const r = await fetch('/upload-folder',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({folder_path:p})
+      body:JSON.stringify({folder_path:p, company: CURRENT_COMPANY})
     });
     const j = await r.json();
     if(j.error){
       showSts(j.error,'error');
       return;
     }
-    addRows(j.rows);
-    showSts(`${j.rows.length} comprobantes importados desde la carpeta.`,'success');
+    const grouped = groupRowsByCompany(j.rows);
+    const companies = Object.keys(grouped).filter(k => grouped[k].length);
+    const currentRows = grouped[CURRENT_COMPANY] || [];
+
+    if (companies.length === 1 && companies[0] !== CURRENT_COMPANY) {
+      showSts(`La carpeta corresponde a ${companyLabel(companies[0])}. Redirigiendo...`, 'success');
+      setTimeout(() => window.location.href = '/empresa/' + companies[0], 500);
+      return;
+    }
+
+    if (currentRows.length) addRows(currentRows);
+    if (companies.length > 1) {
+      showSts(`Importación mixta desde carpeta: ${summarizeCompanies(grouped)}.`, 'success');
+    } else {
+      showSts(`${currentRows.length} comprobantes importados desde la carpeta para ${COMPANY_LABEL}.`,'success');
+    }
   } catch(e) {
     showSts('Error al leer carpeta: ' + e.message, 'error');
   } finally {
     document.getElementById('btnFolder').disabled = false;
   }
 };
+
+async function saveSatConfig(){
+  const rfc = document.getElementById('satRfc').value.trim().toUpperCase();
+  const password = document.getElementById('satPassword').value;
+  const cer = document.getElementById('satCer').files[0];
+  const key = document.getElementById('satKey').files[0];
+  if (!rfc) { showSts('RFC receptor obligatorio', 'error'); return; }
+  if (!password && !satConfigState.configured) { showSts('La contraseña es obligatoria la primera vez', 'error'); return; }
+  if (!cer && !satConfigState.configured) { showSts('Debes cargar el archivo .cer la primera vez', 'error'); return; }
+  if (!key && !satConfigState.configured) { showSts('Debes cargar el archivo .key la primera vez', 'error'); return; }
+
+  const fd = new FormData();
+  fd.append('company', CURRENT_COMPANY);
+  fd.append('rfc_receptor', rfc);
+  fd.append('password', password);
+  if (cer) fd.append('cer_file', cer);
+  if (key) fd.append('key_file', key);
+
+  document.getElementById('btnSatSave').disabled = true;
+  showSts('Guardando credenciales SAT...', 'loading');
+  try {
+    const res = await fetch('/api/sat/config', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'No fue posible guardar la configuración');
+    }
+    document.getElementById('satPassword').value = '';
+    document.getElementById('satCer').value = '';
+    document.getElementById('satKey').value = '';
+    await loadSatConfig();
+    showSts('Credenciales SAT guardadas para ' + COMPANY_LABEL, 'success');
+  } catch (e) {
+    showSts(e.message, 'error');
+  } finally {
+    document.getElementById('btnSatSave').disabled = false;
+  }
+}
+
+async function pollSatJob(jobId){
+  for (;;) {
+    const res = await fetch(withCompany('/api/sat/jobs/' + jobId));
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const job = data.row || {};
+    if (job.progress_message) {
+      showSts(job.progress_message, job.status === 'ERROR' ? 'error' : 'loading');
+    }
+    if (['COMPLETED', 'NO_DATA', 'ERROR'].includes(job.status)) return job;
+    await new Promise(resolve => setTimeout(resolve, 2500));
+  }
+}
+
+async function runSatDownload(){
+  const dateFrom = document.getElementById('satDateFrom').value;
+  const dateTo = document.getElementById('satDateTo').value;
+  const requestType = document.getElementById('satRequestType').value;
+  if (!dateFrom || !dateTo) {
+    showSts('Selecciona rango de fechas SAT', 'error');
+    return;
+  }
+  if (satConfigState.configured && satConfigState.auth_valid === false) {
+    showSts(satConfigState.auth_error || 'La FIEL configurada no pasó validación', 'error');
+    return;
+  }
+  document.getElementById('btnSatDownload').disabled = true;
+  showSts('Enviando descarga SAT...', 'loading');
+  try {
+    const res = await fetch('/api/sat/download', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        company: CURRENT_COMPANY,
+        date_from: dateFrom,
+        date_to: dateTo,
+        request_type: requestType,
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'No fue posible iniciar la descarga SAT');
+    }
+    const job = await pollSatJob(data.job_id);
+    if (job.status === 'ERROR') {
+      throw new Error(job.error_message || job.progress_message || 'Falló la descarga SAT');
+    }
+    await loadRecords();
+    await loadSatConfig();
+    showSts(job.progress_message || 'Descarga SAT completada', job.status === 'NO_DATA' ? 'success' : 'success');
+  } catch (e) {
+    showSts(e.message, 'error');
+  } finally {
+    document.getElementById('btnSatDownload').disabled = false;
+  }
+}
+
+document.getElementById('btnSatSave').onclick = saveSatConfig;
+document.getElementById('btnSatDownload').onclick = runSatDownload;
+document.getElementById('btnSatReload').onclick = loadSatConfig;
 
 /* === DATA === */
 function addRows(newRows){
@@ -378,15 +620,15 @@ function previewRow(id){
   document.getElementById('modalTitle').textContent='Vista Previa — '+(r?r.emisor_nombre:'CFDI');
   document.getElementById('previewFrame').src='about:blank';
   document.getElementById('modal').classList.add('show');
-  fetch('/preview/'+id).then(r=>r.json()).then(j=>{if(j.error){alert(j.error);closeModal();return}const f=document.getElementById('previewFrame');const d=f.contentDocument||f.contentWindow.document;d.open();d.write(j.html);d.close()});
+  fetch(withCompany('/preview/'+id)).then(r=>r.json()).then(j=>{if(j.error){alert(j.error);closeModal();return}const f=document.getElementById('previewFrame');const d=f.contentDocument||f.contentWindow.document;d.open();d.write(j.html);d.close()});
 }
-function downloadRow(id){window.open('/download/'+id,'_blank')}
+function downloadRow(id){window.open(withCompany('/download/'+id),'_blank')}
 function printRow(id){
   showSts('Preparando impresión...', 'loading');
   const iframe = document.createElement('iframe');
   iframe.style.display = 'none';
   document.body.appendChild(iframe);
-  fetch('/preview/'+id).then(r=>r.json()).then(j=>{
+  fetch(withCompany('/preview/'+id)).then(r=>r.json()).then(j=>{
     if(j.error){showSts(j.error,'error');document.body.removeChild(iframe);return}
     const d=iframe.contentDocument||iframe.contentWindow.document;
     d.open();d.write(j.html);d.close();
@@ -485,7 +727,7 @@ function updateDateLabel(){
 document.addEventListener('click',e=>{if(!e.target.closest('.date-range-wrap'))document.getElementById('calendarPopup').classList.remove('show')});
 
 /* === CLEAR === */
-function clearAll(){if(!confirm('¿Limpiar permanentemente todos los registros de la base de datos?'))return;fetch('/clear',{method:'POST'});allRows=[];filtered=[];selectedId=null;render();document.getElementById('filterBar').style.display='none';document.getElementById('mainArea').style.display='none';document.getElementById('detailContent').innerHTML='<div style="text-align:center;padding:60px 20px;color:var(--text-muted)"><div style="font-size:40px;margin-bottom:12px;opacity:.4">📋</div><p>Selecciona un CFDI</p></div>';showSts('Base de datos limpiada','success')}
+function clearAll(){if(!confirm('¿Limpiar permanentemente los registros de ' + COMPANY_LABEL + '?'))return;fetch(withCompany('/clear'),{method:'POST'});allRows=[];filtered=[];selectedId=null;render();document.getElementById('filterBar').style.display='none';document.getElementById('mainArea').style.display='none';document.getElementById('detailContent').innerHTML='<div style="text-align:center;padding:60px 20px;color:var(--text-muted)"><div style="font-size:40px;margin-bottom:12px;opacity:.4">📋</div><p>Selecciona un CFDI</p></div>';showSts('Base de datos limpiada para ' + COMPANY_LABEL,'success')}
 
 /* === UTILS === */
 function showSts(m,t){const s=document.getElementById('statusBar');s.className='status-msg show '+t;s.innerHTML=(t==='loading'?'<div class="spin"></div>':'')+m}

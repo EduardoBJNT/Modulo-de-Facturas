@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.antigravity.cfdi_pdf</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/eduardorivera/Downloads/antigravity/CFDI_PDF/.venv312/bin/python</string>
+    <string>server.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>FLASK_ENV</key>
+    <string>development</string>
+    <key>PORT</key>
+    <string>5050</string>
+    <key>DB_PATH</key>
+    <string>/Users/eduardorivera/Downloads/antigravity/CFDI_PDF/cfdi_data.db</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>WorkingDirectory</key>
+  <string>/Users/eduardorivera/Downloads/antigravity/CFDI_PDF</string>
+  <key>StandardOutPath</key>
+  <string>/Users/eduardorivera/Downloads/antigravity/CFDI_PDF/.logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/eduardorivera/Downloads/antigravity/CFDI_PDF/.logs/launchd.err.log</string>
+</dict>
+</plist>
