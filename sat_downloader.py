@@ -21,6 +21,7 @@ import base64
 import io
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -41,6 +42,26 @@ POLL_MAX_ATTEMPTS = int(os.getenv("SAT_POLL_MAX_ATTEMPTS", "45"))
 POLL_BACKOFF_FACTOR = 1.5
 
 
+def _env_int(name: str, default: int, min_value: int = 1, max_value: int = 300) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return max(min_value, min(max_value, value))
+
+
+SAT_REQUEST_TIMEOUT = _env_int("SAT_REQUEST_TIMEOUT", 45, min_value=5, max_value=180)
+SAT_VERIFY_TIMEOUT = _env_int("SAT_VERIFY_TIMEOUT", 120, min_value=30, max_value=240)
+SAT_NETWORK_ATTEMPTS = _env_int("SAT_NETWORK_ATTEMPTS", 3, min_value=1, max_value=8)
+SAT_NETWORK_RETRY_WAIT = _env_int("SAT_NETWORK_RETRY_WAIT", 3, min_value=1, max_value=30)
+SAT_CHUNK_DAYS = _env_int("SAT_CHUNK_DAYS", 31, min_value=1, max_value=31)
+DEFAULT_SAT_HOST_IPS = {
+    "cfdidescargamasivasolicitud.clouda.sat.gob.mx": "13.65.17.50",
+    "cfdidescargamasiva.clouda.sat.gob.mx": "40.74.244.66",
+}
+_ORIGINAL_GETADDRINFO = None
+
+
 class SatConfigError(RuntimeError):
     pass
 
@@ -59,6 +80,109 @@ class SatVerifyError(RuntimeError):
 
 class SatDownloadError(RuntimeError):
     pass
+
+
+def _short_error(exc: Exception, limit: int = 500) -> str:
+    text = re.sub(r"\s+", " ", str(exc)).strip()
+    return text[:limit]
+
+
+def _is_sat_connectivity_error(exc: Exception) -> bool:
+    try:
+        import requests
+
+        if isinstance(
+            exc,
+            (
+                requests.exceptions.ConnectTimeout,
+                requests.exceptions.ConnectionError,
+                requests.exceptions.ReadTimeout,
+                requests.exceptions.Timeout,
+            ),
+        ):
+            return True
+    except Exception:
+        pass
+
+    err = str(exc).lower()
+    return any(
+        token in err
+        for token in (
+            "connecttimeout",
+            "readtimeout",
+            "connectionerror",
+            "max retries exceeded",
+            "newconnectionerror",
+            "nameresolutionerror",
+            "failed to resolve",
+            "temporary failure in name resolution",
+            "nodename nor servname",
+            "timed out",
+            "connection timed out",
+            "network is unreachable",
+            "connection refused",
+        )
+    )
+
+
+def _sat_connectivity_message(stage: str, exc: Exception) -> str:
+    return (
+        f"No fue posible conectar con el servicio SAT durante {stage}. "
+        "La FIEL no fue rechazada; falló la conexión, DNS o timeout contra clouda.sat.gob.mx. "
+        "Verifica internet, VPN/firewall y vuelve a intentar. "
+        f"Detalle técnico: {_short_error(exc)}"
+    )
+
+
+def _sat_host_ip_overrides() -> dict[str, str]:
+    overrides = dict(DEFAULT_SAT_HOST_IPS)
+    raw = os.getenv("SAT_HOST_OVERRIDES", "")
+    for item in raw.split(","):
+        if "=" not in item:
+            continue
+        host, ip = item.split("=", 1)
+        host = host.strip().lower()
+        ip = ip.strip()
+        if host and ip:
+            overrides[host] = ip
+    return overrides
+
+
+def _install_sat_dns_fallback():
+    global _ORIGINAL_GETADDRINFO
+    if _ORIGINAL_GETADDRINFO is not None:
+        return
+
+    import socket
+
+    overrides = _sat_host_ip_overrides()
+    original_getaddrinfo = socket.getaddrinfo
+
+    def getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        try:
+            return original_getaddrinfo(host, port, family, type, proto, flags)
+        except socket.gaierror:
+            fallback_ip = overrides.get(str(host or "").lower())
+            if not fallback_ip:
+                raise
+            fallback_family = socket.AF_INET6 if ":" in fallback_ip else socket.AF_INET
+            logger.warning("DNS SAT no resolvió %s; usando fallback %s", host, fallback_ip)
+            return original_getaddrinfo(fallback_ip, port, fallback_family, type, proto, flags)
+
+    _ORIGINAL_GETADDRINFO = original_getaddrinfo
+    socket.getaddrinfo = getaddrinfo
+
+
+def _date_chunks(date_from: str, date_to: str, chunk_days: int = SAT_CHUNK_DAYS) -> list[tuple[str, str]]:
+    start = datetime.strptime(date_from, "%Y-%m-%d").date()
+    end = datetime.strptime(date_to, "%Y-%m-%d").date()
+    chunks = []
+    cursor = start
+    while cursor <= end:
+        chunk_end = min(cursor + timedelta(days=chunk_days - 1), end)
+        chunks.append((cursor.isoformat(), chunk_end.isoformat()))
+        cursor = chunk_end + timedelta(days=1)
+    return chunks
 
 
 def _load_certificate_bundle(cer_bytes: bytes):
@@ -160,6 +284,7 @@ def validate_sat_bundle(cer_bytes: bytes, key_bytes: bytes, password: str):
 
 class SatDownloader:
     def __init__(self, rfc_receptor: str, cer_bytes: bytes, key_bytes: bytes, password: str):
+        _install_sat_dns_fallback()
         self._creds = {
             "rfc_receptor": (rfc_receptor or "").strip().upper(),
             "cer_bytes": cer_bytes or b"",
@@ -281,6 +406,28 @@ class SatDownloader:
             except Exception:
                 pass
 
+    def _call_sat_with_retries(self, stage: str, call, error_cls, attempts: int | None = None):
+        last_exc = None
+        attempts_limit = attempts or SAT_NETWORK_ATTEMPTS
+        for attempt in range(1, attempts_limit + 1):
+            try:
+                return call()
+            except Exception as exc:
+                if not _is_sat_connectivity_error(exc):
+                    raise
+                last_exc = exc
+                if attempt >= attempts_limit:
+                    break
+                logger.warning(
+                    "Timeout/conexión SAT en %s. Reintento %s/%s: %s",
+                    stage,
+                    attempt + 1,
+                    attempts_limit,
+                    _short_error(exc, 220),
+                )
+                time.sleep(SAT_NETWORK_RETRY_WAIT * attempt)
+        raise error_cls(_sat_connectivity_message(stage, last_exc)) from last_exc
+
     def authenticate(self):
         if self._token and self._token_expiry:
             remaining = (self._token_expiry - datetime.now(timezone.utc)).total_seconds()
@@ -304,11 +451,14 @@ class SatDownloader:
         try:
             from cfdiclient import Autenticacion
 
-            auth = Autenticacion(self._get_cfdiclient_fiel(), verify=True, timeout=30)
-            token = auth.obtener_token()
-            if not token:
-                raise SatAuthError("El SAT devolvió un token vacío.")
-            return token
+            def call():
+                auth = Autenticacion(self._get_cfdiclient_fiel(), verify=True, timeout=SAT_REQUEST_TIMEOUT)
+                token = auth.obtener_token()
+                if not token:
+                    raise SatAuthError("El SAT devolvió un token vacío.")
+                return token
+
+            return self._call_sat_with_retries("autenticación", call, SatAuthError)
         except SatAuthError:
             raise
         except Exception as exc:
@@ -380,27 +530,31 @@ class SatDownloader:
             to_dt = datetime.now().replace(microsecond=0) if to_date >= today else datetime.combine(to_date, datetime.max.time()).replace(microsecond=0)
 
             if request_type == "received":
-                descarga = SolicitaDescargaRecibidos(self._get_cfdiclient_fiel(), verify=True, timeout=30)
-                result = descarga.solicitar_descarga(
-                    token,
-                    rfc,
-                    from_dt,
-                    to_dt,
-                    rfc_receptor=rfc,
-                    tipo_solicitud="CFDI",
-                    estado_comprobante="Vigente",
-                )
+                def call():
+                    descarga = SolicitaDescargaRecibidos(self._get_cfdiclient_fiel(), verify=True, timeout=SAT_REQUEST_TIMEOUT)
+                    return descarga.solicitar_descarga(
+                        token,
+                        rfc,
+                        from_dt,
+                        to_dt,
+                        rfc_receptor=rfc,
+                        tipo_solicitud="CFDI",
+                        estado_comprobante="Vigente",
+                    )
             else:
-                descarga = SolicitaDescargaEmitidos(self._get_cfdiclient_fiel(), verify=True, timeout=30)
-                result = descarga.solicitar_descarga(
-                    token,
-                    rfc,
-                    from_dt,
-                    to_dt,
-                    rfc_emisor=rfc,
-                    tipo_solicitud="CFDI",
-                    estado_comprobante="Vigente",
-                )
+                def call():
+                    descarga = SolicitaDescargaEmitidos(self._get_cfdiclient_fiel(), verify=True, timeout=SAT_REQUEST_TIMEOUT)
+                    return descarga.solicitar_descarga(
+                        token,
+                        rfc,
+                        from_dt,
+                        to_dt,
+                        rfc_emisor=rfc,
+                        tipo_solicitud="CFDI",
+                        estado_comprobante="Vigente",
+                    )
+
+            result = self._call_sat_with_retries("solicitud de descarga", call, SatRequestError)
             request_id = None
             if result:
                 request_id = result.get("request_id") or result.get("id_solicitud")
@@ -486,8 +640,32 @@ class SatDownloader:
                     continue
 
                 raise SatVerifyError(f"SAT devolvió estado inesperado: {status_code} - {status}")
-            except SatVerifyError:
-                raise
+            except SatVerifyError as exc:
+                if not _is_sat_connectivity_error(exc):
+                    raise
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "stage": "verify",
+                            "attempt": attempt,
+                            "status_code": "",
+                            "status": "SAT no respondió a tiempo; reintentando verificación",
+                            "package_ids": [],
+                            "packages_count": 0,
+                            "cfdis_count": 0,
+                        }
+                    )
+                if attempt >= attempts_limit:
+                    raise SatVerifyError(
+                        f"Se agotaron los {attempts_limit} intentos de verificación. Último error: {exc}"
+                    ) from exc
+                time.sleep(wait)
+                wait = min(wait * POLL_BACKOFF_FACTOR, POLL_MAX_WAIT)
+                try:
+                    token = self.authenticate()
+                except SatAuthError:
+                    pass
+                continue
             except Exception as exc:
                 if attempt >= attempts_limit:
                     raise SatVerifyError(
@@ -506,8 +684,11 @@ class SatDownloader:
             if self._backend == "cfdiclient":
                 from cfdiclient import VerificaSolicitudDescarga
 
-                verificacion = VerificaSolicitudDescarga(self._get_cfdiclient_fiel(), verify=True, timeout=30)
-                result = verificacion.verificar_descarga(token, rfc, request_id)
+                def call():
+                    verificacion = VerificaSolicitudDescarga(self._get_cfdiclient_fiel(), verify=True, timeout=SAT_VERIFY_TIMEOUT)
+                    return verificacion.verificar_descarga(token, rfc, request_id)
+
+                result = self._call_sat_with_retries("verificación de solicitud", call, SatVerifyError, attempts=1)
                 return {
                     "status_code": str(result.get("estado_solicitud", "") or ""),
                     "status": str(result.get("mensaje", "") or result.get("codigo_estado_solicitud", "") or ""),
@@ -542,8 +723,11 @@ class SatDownloader:
             if self._backend == "cfdiclient":
                 from cfdiclient import DescargaMasiva
 
-                descarga = DescargaMasiva(self._get_cfdiclient_fiel(), verify=True, timeout=60)
-                response = descarga.descargar_paquete(token, rfc, package_id)
+                def call():
+                    descarga = DescargaMasiva(self._get_cfdiclient_fiel(), verify=True, timeout=max(SAT_REQUEST_TIMEOUT, 60))
+                    return descarga.descargar_paquete(token, rfc, package_id)
+
+                response = self._call_sat_with_retries("descarga de paquete", call, SatDownloadError)
                 encoded = response.get("paquete_b64") if response else None
                 if not encoded:
                     raise SatDownloadError(f"Paquete vacío devuelto por SAT para ID: {package_id}")
@@ -604,6 +788,11 @@ class SatDownloader:
         }
 
         try:
+            if not existing_request_id:
+                chunks = _date_chunks(date_from, date_to)
+                if len(chunks) > 1:
+                    return self._execute_chunked_flow(chunks, request_type, progress_callback)
+
             if progress_callback:
                 progress_callback({"stage": "connecting", "message": "Autenticando FIEL y enviando solicitud al SAT."})
 
@@ -659,7 +848,8 @@ class SatDownloader:
             result["error"] = f"Configuración FIEL incompleta: {exc}"
             result["status"] = "error"
         except SatAuthError as exc:
-            result["error"] = f"Error de autenticación FIEL: {exc}"
+            message = str(exc)
+            result["error"] = message if message.startswith("No fue posible conectar") else f"Error de autenticación FIEL: {message}"
             result["status"] = "error"
         except SatRequestError as exc:
             result["error"] = f"Error al solicitar descarga: {exc}"
@@ -672,4 +862,99 @@ class SatDownloader:
             result["status"] = "error"
             logger.exception("Error inesperado en flujo SAT")
 
+        return result
+
+    def _download_verified_packages(self, request_id: str, verify_result: dict, progress_callback=None) -> tuple[list[dict], list[dict]]:
+        all_xmls = []
+        download_errors = []
+        for pkg_id in verify_result.get("package_ids", []):
+            try:
+                if progress_callback:
+                    progress_callback({"stage": "downloading", "package_id": pkg_id, "message": f"Descargando paquete {pkg_id}."})
+                zip_bytes = self.download_package(pkg_id)
+                xmls = self.extract_xmls_from_zip(zip_bytes)
+                all_xmls.extend(xmls)
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "stage": "package_done",
+                            "package_id": pkg_id,
+                            "xmls_count": len(xmls),
+                            "message": f"Paquete procesado: {len(xmls)} XMLs.",
+                        }
+                    )
+            except SatDownloadError as exc:
+                download_errors.append({"request_id": request_id, "package_id": pkg_id, "error": str(exc)})
+        return all_xmls, download_errors
+
+    def _execute_chunked_flow(self, chunks: list[tuple[str, str]], request_type: str, progress_callback=None) -> dict:
+        result = {
+            "request_id": None,
+            "packages_count": 0,
+            "xmls": [],
+            "download_errors": [],
+            "error": None,
+            "status": "ok",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        request_items = []
+
+        try:
+            if progress_callback:
+                progress_callback({"stage": "connecting", "message": f"Dividiendo consulta SAT en {len(chunks)} bloques."})
+
+            for idx, (chunk_from, chunk_to) in enumerate(chunks, 1):
+                request_id = self.request_download(chunk_from, chunk_to, request_type)
+                request_items.append({"request_id": request_id, "date_from": chunk_from, "date_to": chunk_to})
+                result["request_id"] = ",".join(item["request_id"] for item in request_items)
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "stage": "requested",
+                            "request_id": result["request_id"],
+                            "message": f"Solicitud SAT {idx}/{len(chunks)} aceptada: {chunk_from} a {chunk_to}.",
+                        }
+                    )
+
+            total_cfdis = 0
+            for idx, item in enumerate(request_items, 1):
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "stage": "verify",
+                            "attempt": idx,
+                            "status_code": "",
+                            "status": f"Verificando bloque {idx}/{len(request_items)}",
+                            "package_ids": [],
+                            "packages_count": result["packages_count"],
+                            "cfdis_count": total_cfdis,
+                        }
+                    )
+                verify_result = self.verify_request(item["request_id"], progress_callback=progress_callback)
+                result["packages_count"] += verify_result.get("packages_count", 0)
+                total_cfdis += verify_result.get("cfdis_count", 0)
+                xmls, errors = self._download_verified_packages(item["request_id"], verify_result, progress_callback)
+                result["xmls"].extend(xmls)
+                result["download_errors"].extend(errors)
+
+            if result["packages_count"] == 0 and not result["xmls"]:
+                result["status"] = "no_data"
+            return result
+        except SatConfigError as exc:
+            result["error"] = f"Configuración FIEL incompleta: {exc}"
+            result["status"] = "error"
+        except SatAuthError as exc:
+            message = str(exc)
+            result["error"] = message if message.startswith("No fue posible conectar") else f"Error de autenticación FIEL: {message}"
+            result["status"] = "error"
+        except SatRequestError as exc:
+            result["error"] = f"Error al solicitar descarga: {exc}"
+            result["status"] = "error"
+        except SatVerifyError as exc:
+            result["error"] = f"Error verificando estado: {exc}"
+            result["status"] = "error"
+        except Exception as exc:
+            result["error"] = f"Error inesperado: {exc}"
+            result["status"] = "error"
+            logger.exception("Error inesperado en flujo SAT por bloques")
         return result

@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: cfdi-pdf
+    runtime: docker
+    plan: starter
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: DB_PATH
+        value: /app/data/cfdi_data.db
+      - key: FLASK_ENV
+        value: production
+    disk:
+      name: cfdi-data
+      mountPath: /app/data
+      sizeGB: 1

@@ -17,7 +17,10 @@ if [ ! -x "$PYTHON_BIN" ]; then
 fi
 
 if ! lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-  nohup "$PYTHON_BIN" server.py >/tmp/app_facturas_recibidas.log 2>&1 &
+  TERMINAL_SCRIPT="cd $PROJECT_DIR; PORT=$PORT DB_PATH=$PROJECT_DIR/cfdi_data.db exec $PYTHON_BIN server.py"
+  TERMINAL_SCRIPT="${TERMINAL_SCRIPT//\\/\\\\}"
+  TERMINAL_SCRIPT="${TERMINAL_SCRIPT//\"/\\\"}"
+  osascript -e "tell application \"Terminal\" to do script \"$TERMINAL_SCRIPT\""
   for _ in {1..45}; do
     if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
       break

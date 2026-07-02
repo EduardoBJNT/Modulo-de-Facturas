@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>App Facturas Recibidas</title>
-<link rel="stylesheet" href="/static/styles.css">
+<link rel="stylesheet" href="/static/styles.css?v=20260625-accordion">
 </head>
 <body>
 <aside class="sidebar">
@@ -32,9 +32,18 @@
 
 <div class="content-view">
 <!-- HEADER -->
+<section class="view-accordion" id="invoiceAccordion">
 <div class="view-header">
-<div><h1 class="view-title">FACTURAS RECIBIDAS</h1><p class="view-subtitle">Repositorio histórico y persistente de comprobantes fiscales CFDI.</p><div class="company-badge">{{ company.label }}</div></div>
+<div>
+<div class="view-title-row">
+<button class="view-collapse-btn" id="invoiceAccordionBtn" type="button" onclick="toggleInvoiceAccordion()" aria-expanded="true" aria-controls="uploadArea">⌃</button>
+<h1 class="view-title">FACTURAS RECIBIDAS</h1>
+</div>
+<p class="view-subtitle">Repositorio histórico y persistente de comprobantes fiscales CFDI.</p>
+<div class="company-badge">{{ company.label }}</div>
+</div>
 <div class="header-actions">
+<button class="btn btn-secondary" id="btnSatToggle" onclick="toggleSatConfig()" aria-expanded="false" aria-controls="satConfigPanel">Mostrar descarga SAT</button>
 <div style="position:relative">
 <button class="btn btn-secondary" id="btnBulkMenu" onclick="document.getElementById('bulkMenu').classList.toggle('hidden')">Operaciones Masivas ▾</button>
 <div id="bulkMenu" class="hidden" style="position:absolute;top:100%;right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:100;min-width:200px;padding:6px 0;margin-top:6px">
@@ -47,7 +56,7 @@
 </div>
 
 <!-- UPLOAD AREA -->
-<div id="uploadArea">
+<div id="uploadArea" class="view-accordion-body">
 <div class="upload-tabs">
 <div class="upload-tab active" data-tab="single" onclick="showTab('single')">📄 Individual</div>
 <div class="upload-tab" data-tab="batch" onclick="showTab('batch')">📁 Múltiples Archivos</div>
@@ -63,8 +72,9 @@
 <div class="folder-row"><input type="text" id="folderPath" placeholder="/ruta/absoluta/a/carpeta/con/xmls"><button class="btn btn-primary" id="btnFolder">📂 Leer Carpeta</button></div>
 </div>
 </div>
+</section>
 
-<div class="sat-card">
+<div class="sat-card hidden" id="satConfigPanel">
 <div class="sat-head">
 <div>
 <div class="sat-title">Descarga directa SAT</div>
@@ -179,6 +189,8 @@ let allRows=[],filtered=[],sortCol='fecha',sortDir=-1,page=0,selectedId=null;
 const PS=15;
 let calMonth,calYear,dateFrom=null,dateTo=null,calSelecting='from';
 let satConfigState={configured:false};
+let invoiceAccordionOpen=true;
+let satConfigOpen=false;
 
 function setCompany(companyKey){
   if (!COMPANY_OPTIONS[companyKey]) return;
@@ -293,8 +305,26 @@ function toggleSidebar() {
   localStorage.setItem('sidebar-collapsed', sb.classList.contains('collapsed'));
 }
 
+function toggleInvoiceAccordion(){
+  invoiceAccordionOpen = !invoiceAccordionOpen;
+  const btn = document.getElementById('invoiceAccordionBtn');
+  const body = document.getElementById('uploadArea');
+  document.getElementById('invoiceAccordion').classList.toggle('collapsed', !invoiceAccordionOpen);
+  btn.setAttribute('aria-expanded', invoiceAccordionOpen ? 'true' : 'false');
+  body.classList.toggle('hidden', !invoiceAccordionOpen);
+}
+
+function toggleSatConfig(){
+  satConfigOpen = !satConfigOpen;
+  document.getElementById('satConfigPanel').classList.toggle('hidden', !satConfigOpen);
+  const btn = document.getElementById('btnSatToggle');
+  btn.textContent = satConfigOpen ? 'Ocultar descarga SAT' : 'Mostrar descarga SAT';
+  btn.setAttribute('aria-expanded', satConfigOpen ? 'true' : 'false');
+}
+
 /* === TABS === */
 function showTab(t){
+  if (!invoiceAccordionOpen) toggleInvoiceAccordion();
   document.querySelectorAll('.upload-tab').forEach(x=>{x.classList.toggle('active',x.dataset.tab===t)});
   document.querySelectorAll('.upload-pane').forEach(x=>x.classList.remove('active'));
   document.getElementById('pane'+t.charAt(0).toUpperCase()+t.slice(1)).classList.add('active');
@@ -610,7 +640,7 @@ function selectRow(id){
 <div class="detail-row"><span class="lbl">Nombre</span><span class="val">${esc(r.receptor_nombre)}</span></div>
 <div class="detail-row"><span class="lbl">RFC</span><span class="val mono">${esc(r.receptor_rfc)}</span></div>
 </div>
-<div class="detail-actions"><button class="btn btn-secondary btn-sm" onclick="previewRow('${r.id}')">👁 Ver</button><button class="btn btn-secondary btn-sm" style="background:#f1f5f9;border-color:#cbd5e1" onclick="printRow('${r.id}')">🖨️ Imprimir</button><button class="btn btn-primary btn-sm" onclick="downloadRow('${r.id}')">⬇ PDF</button></div>`;
+<div class="detail-actions"><button class="btn btn-secondary btn-sm" onclick="previewRow('${r.id}')">👁 Ver</button><button class="btn btn-secondary btn-sm" style="background:#f1f5f9;border-color:#cbd5e1" onclick="printRow('${r.id}')">🖨️ Imprimir</button><button class="btn btn-primary btn-sm" onclick="downloadRow('${r.id}')">⬇ PDF</button><button class="btn btn-secondary btn-sm" onclick="downloadXmlRow('${r.id}')">⬇ XML</button></div>`;
 }
 
 /* === PREVIEW & DOWNLOAD === */
@@ -623,6 +653,7 @@ function previewRow(id){
   fetch(withCompany('/preview/'+id)).then(r=>r.json()).then(j=>{if(j.error){alert(j.error);closeModal();return}const f=document.getElementById('previewFrame');const d=f.contentDocument||f.contentWindow.document;d.open();d.write(j.html);d.close()});
 }
 function downloadRow(id){window.open(withCompany('/download/'+id),'_blank')}
+function downloadXmlRow(id){window.open(withCompany('/download-xml/'+id),'_blank')}
 function printRow(id){
   showSts('Preparando impresión...', 'loading');
   const iframe = document.createElement('iframe');

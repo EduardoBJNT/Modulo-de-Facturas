@@ -1188,6 +1188,41 @@ def download_entry(entry_id):
     return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf',
                      as_attachment=True, download_name=fname)
 
+@app.route('/download-xml/<entry_id>')
+def download_xml_entry(entry_id):
+    company_key = get_request_company()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        SELECT xml_content, filename, serie_folio, uuid
+        FROM cfdi_records
+        WHERE id = ? AND COALESCE(company_key, "bajanet") = ?
+        ''',
+        (entry_id, company_key),
+    )
+    res = cursor.fetchone()
+    conn.close()
+
+    if not res:
+        return jsonify({'error': 'CFDI no encontrado'}), 404
+
+    xml_content, filename, serie_folio, uuid_val = res
+    if not xml_content:
+        return jsonify({'error': 'XML no disponible'}), 404
+
+    base_name = filename if filename and filename.lower().endswith('.xml') else f"CFDI_{serie_folio or uuid_val or entry_id}.xml"
+    safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', base_name).strip('._') or 'cfdi.xml'
+    if not safe_name.lower().endswith('.xml'):
+        safe_name += '.xml'
+
+    return send_file(
+        io.BytesIO(xml_content),
+        mimetype='application/xml',
+        as_attachment=True,
+        download_name=safe_name,
+    )
+
 @app.route('/clear', methods=['POST'])
 def clear_store():
     company_key = get_request_company()
