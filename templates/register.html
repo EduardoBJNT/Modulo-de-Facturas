@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Crear cuenta | App Facturas Recibidas</title>
+<link rel="stylesheet" href="/static/styles.css?v=20260703-auth">
+</head>
+<body class="auth-body">
+<main class="auth-shell">
+<section class="auth-card" aria-label="Registro">
+<div class="auth-brand">
+<div class="auth-logo">AFR</div>
+<div>
+<div class="auth-brand-name">App Facturas Recibidas</div>
+<div class="auth-brand-sub">Repositorio CFDI</div>
+</div>
+</div>
+<h1>Crea tu cuenta</h1>
+{% if error %}
+<div class="auth-alert">{{ error }}</div>
+{% endif %}
+{% if registration_open() %}
+<form class="auth-form" method="post" action="/registro">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input name="display_name" type="text" autocomplete="name" placeholder="Nombre" maxlength="120">
+<input name="username" type="email" autocomplete="username" placeholder="Correo electrónico" maxlength="254" required autofocus>
+<div class="auth-password">
+<input id="password" name="password" type="password" autocomplete="new-password" placeholder="Contraseña" minlength="8" maxlength="128" required>
+<button type="button" aria-label="Mostrar contraseña" onclick="togglePassword('password', this)">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+</button>
+</div>
+<div class="auth-password">
+<input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" placeholder="Confirmar contraseña" minlength="8" maxlength="128" required>
+<button type="button" aria-label="Mostrar contraseña" onclick="togglePassword('password_confirm', this)">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+</button>
+</div>
+<button class="auth-submit" type="submit">Crear cuenta</button>
+</form>
+{% endif %}
+<div class="auth-footer">
+<span>¿Ya tienes cuenta?</span>
+<a href="/login">Ingresar</a>
+</div>
+</section>
+</main>
+<script>
+function togglePassword(id, btn){
+  const input=document.getElementById(id);
+  input.type=input.type==='password'?'text':'password';
+  btn.setAttribute('aria-label', input.type==='password'?'Mostrar contraseña':'Ocultar contraseña');
+}
+</script>
+</body>
+</html>

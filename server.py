@@ -13,17 +13,31 @@ import sqlite3
 import re
 import secrets
 import subprocess
+import time
+import hashlib
+import smtplib
 from datetime import datetime
 from datetime import timedelta
+from email.message import EmailMessage
 from threading import Lock, Thread
-from flask import Flask, render_template, request, send_file, jsonify
+from flask import Flask, render_template, request, send_file, jsonify, session, redirect, url_for, g
 from jinja2 import Environment, FileSystemLoader
+from werkzeug.security import check_password_hash, generate_password_hash
 from weasyprint import HTML
 import qrcode
 from cfdi_parser import parse_cfdi, validate_cfdi_40
 
+BASE_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+APP_SECRET_KEY_PATH = os.path.join(DATA_DIR, '.app_secret_key')
+SAT_MASTER_KEY_PATH = os.path.join(DATA_DIR, '.sat_master_key')
+
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['MAX_CONTENT_LENGTH'] = 256 * 1024 * 1024  # 256 MB for batch
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', '0') == '1'
+app.permanent_session_lifetime = timedelta(hours=int(os.getenv('SESSION_HOURS', '12')))
 
 COMPANIES = {
     'bajanet': {
@@ -37,6 +51,11 @@ COMPANIES = {
 }
 
 DEFAULT_COMPANY = 'bajanet'
+ALLOW_USER_REGISTRATION = os.getenv('ALLOW_USER_REGISTRATION', '1') == '1'
+LOGIN_ATTEMPT_WINDOW_SECONDS = int(os.getenv('LOGIN_ATTEMPT_WINDOW_SECONDS', '900'))
+MAX_LOGIN_ATTEMPTS = int(os.getenv('MAX_LOGIN_ATTEMPTS', '5'))
+PASSWORD_RESET_MINUTES = int(os.getenv('PASSWORD_RESET_MINUTES', '30'))
+LOGIN_ATTEMPTS = {}
 
 def _normalize_rfc(value):
     return (value or '').strip().upper()
@@ -47,15 +66,18 @@ COMPANY_RFC_RULES = {
 }
 
 SAT_DOWNLOAD_LOCKS = {key: Lock() for key in COMPANIES}
-BASE_DIR = os.path.dirname(__file__)
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-SAT_MASTER_KEY_PATH = os.path.join(DATA_DIR, '.sat_master_key')
 
 @app.after_request
 def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    cors_origin = os.getenv('CORS_ORIGIN')
+    if cors_origin:
+        response.headers['Access-Control-Allow-Origin'] = cors_origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-CSRF-Token'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     return response
 DB_PATH = os.getenv('DB_PATH', os.path.join(os.path.dirname(__file__), 'cfdi_data.db'))
 SQLITE_TIMEOUT_SECONDS = int(os.getenv('SQLITE_TIMEOUT_SECONDS', '30'))
@@ -67,6 +89,290 @@ def get_db_connection():
     conn.execute(f'PRAGMA busy_timeout = {SQLITE_TIMEOUT_SECONDS * 1000}')
     conn.execute('PRAGMA foreign_keys = ON')
     return conn
+
+def normalize_username(value):
+    return (value or '').strip().lower()
+
+def validate_email(value):
+    value = normalize_username(value)
+    return bool(re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', value)) and len(value) <= 254
+
+def validate_username(value):
+    return validate_email(value)
+
+def validate_password(value):
+    return bool(value and len(value) >= 8 and len(value) <= 128)
+
+def get_user_by_id(user_id):
+    if not user_id:
+        return None
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT id, username, display_name, role, active, created_at, last_login_at
+            FROM users
+            WHERE id = ? AND active = 1
+            """,
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def get_user_for_auth(username):
+    username = normalize_username(username)
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        return conn.execute(
+            """
+            SELECT id, username, password_hash, display_name, role, active
+            FROM users
+            WHERE username = ? AND active = 1
+            """,
+            (username,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+def get_user_by_email(email):
+    email = normalize_username(email)
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        return conn.execute(
+            """
+            SELECT id, username, display_name, active
+            FROM users
+            WHERE username = ? AND active = 1
+            """,
+            (email,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+def users_exist():
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT 1 FROM users WHERE active = 1 LIMIT 1").fetchone()
+        return bool(row)
+    finally:
+        conn.close()
+
+def registration_is_open():
+    return ALLOW_USER_REGISTRATION or not users_exist()
+
+def create_user(username, password, display_name=''):
+    username = normalize_username(username)
+    display_name = (display_name or username).strip()[:120]
+    if not validate_username(username):
+        raise ValueError('Ingresa un correo electrónico válido.')
+    if not validate_password(password):
+        raise ValueError('La contraseña debe tener entre 8 y 128 caracteres.')
+
+    now_value = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    user_id = secrets.token_urlsafe(18)
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO users (id, username, password_hash, display_name, role, active, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'user', 1, ?, ?)
+            """,
+            (user_id, username, generate_password_hash(password), display_name, now_value, now_value),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise ValueError('El usuario ya existe.') from exc
+    finally:
+        conn.close()
+    return user_id
+
+def update_last_login(user_id):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET last_login_at = ? WHERE id = ?",
+            (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), user_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def auth_attempt_key(username):
+    remote_addr = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
+    return f"{remote_addr}:{normalize_username(username)}"
+
+def login_is_limited(username):
+    now_ts = time.time()
+    key = auth_attempt_key(username)
+    attempts = [ts for ts in LOGIN_ATTEMPTS.get(key, []) if now_ts - ts <= LOGIN_ATTEMPT_WINDOW_SECONDS]
+    LOGIN_ATTEMPTS[key] = attempts
+    return len(attempts) >= MAX_LOGIN_ATTEMPTS
+
+def record_login_failure(username):
+    key = auth_attempt_key(username)
+    LOGIN_ATTEMPTS.setdefault(key, []).append(time.time())
+
+def clear_login_failures(username):
+    LOGIN_ATTEMPTS.pop(auth_attempt_key(username), None)
+
+def authenticate_user(username, password):
+    row = get_user_for_auth(username)
+    if not row or not check_password_hash(row['password_hash'], password or ''):
+        return None
+    return dict(row)
+
+def password_reset_token_hash(token):
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+def create_password_reset_token(user_id):
+    token = secrets.token_urlsafe(48)
+    token_hash = password_reset_token_hash(token)
+    now_value = datetime.now()
+    expires_at = now_value + timedelta(minutes=PASSWORD_RESET_MINUTES)
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM password_reset_tokens WHERE expires_at < ? OR used_at IS NOT NULL", (now_value.strftime('%Y-%m-%d %H:%M:%S'),))
+        conn.execute(
+            """
+            INSERT INTO password_reset_tokens (token_hash, user_id, expires_at, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                token_hash,
+                user_id,
+                expires_at.strftime('%Y-%m-%d %H:%M:%S'),
+                now_value.strftime('%Y-%m-%d %H:%M:%S'),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return token
+
+def build_reset_url(token):
+    public_url = (os.getenv('APP_PUBLIC_URL') or '').rstrip('/')
+    path = url_for('reset_password', token=token)
+    if public_url:
+        return public_url + path
+    return url_for('reset_password', token=token, _external=True)
+
+def send_password_reset_email(email, reset_url):
+    smtp_host = os.getenv('SMTP_HOST')
+    smtp_from = os.getenv('SMTP_FROM') or os.getenv('SMTP_USER')
+    if not smtp_host or not smtp_from:
+        print(f"SMTP no configurado. Enlace de restablecimiento para {email}: {reset_url}")
+        return False
+
+    smtp_port = int(os.getenv('SMTP_PORT', '587'))
+    smtp_user = os.getenv('SMTP_USER')
+    smtp_password = os.getenv('SMTP_PASSWORD')
+    use_ssl = os.getenv('SMTP_USE_SSL', '0') == '1'
+    use_tls = os.getenv('SMTP_USE_TLS', '1') == '1'
+
+    message = EmailMessage()
+    message['Subject'] = 'Restablecer contraseña'
+    message['From'] = smtp_from
+    message['To'] = email
+    message.set_content(
+        "Solicitaste restablecer tu contraseña.\n\n"
+        f"Abre este enlace dentro de los próximos {PASSWORD_RESET_MINUTES} minutos:\n{reset_url}\n\n"
+        "Si no solicitaste este cambio, ignora este correo."
+    )
+
+    smtp_cls = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+    with smtp_cls(smtp_host, smtp_port, timeout=20) as smtp:
+        if use_tls and not use_ssl:
+            smtp.starttls()
+        if smtp_user and smtp_password:
+            smtp.login(smtp_user, smtp_password)
+        smtp.send_message(message)
+    return True
+
+def request_password_reset(email):
+    user = get_user_by_email(email)
+    if not user:
+        return
+    token = create_password_reset_token(user['id'])
+    send_password_reset_email(user['username'], build_reset_url(token))
+
+def reset_password_with_token(token, password):
+    token_hash = password_reset_token_hash(token or '')
+    now_value = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT token_hash, user_id
+            FROM password_reset_tokens
+            WHERE token_hash = ? AND used_at IS NULL AND expires_at >= ?
+            """,
+            (token_hash, now_value),
+        ).fetchone()
+        if not row:
+            raise ValueError('El enlace no es válido o ya expiró.')
+        if not validate_password(password):
+            raise ValueError('La contraseña debe tener entre 8 y 128 caracteres.')
+        conn.execute(
+            "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+            (generate_password_hash(password), now_value, row['user_id']),
+        )
+        conn.execute(
+            "UPDATE password_reset_tokens SET used_at = ? WHERE token_hash = ?",
+            (now_value, token_hash),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_csrf_token():
+    token = session.get('csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['csrf_token'] = token
+    return token
+
+def valid_csrf_token():
+    sent = request.form.get('csrf_token') or request.headers.get('X-CSRF-Token') or ''
+    return bool(sent and secrets.compare_digest(sent, session.get('csrf_token') or ''))
+
+def wants_json_response():
+    return request.path.startswith('/api/') or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+def login_user(user):
+    session.clear()
+    session.permanent = True
+    session['user_id'] = user['id']
+    session['csrf_token'] = secrets.token_urlsafe(32)
+    update_last_login(user['id'])
+
+@app.context_processor
+def inject_auth_context():
+    return {
+        'current_user': getattr(g, 'current_user', None),
+        'csrf_token': get_csrf_token,
+        'registration_open': registration_is_open,
+    }
+
+@app.before_request
+def require_authenticated_user():
+    g.current_user = get_user_by_id(session.get('user_id'))
+    public_endpoints = {'login', 'register', 'forgot_password', 'reset_password', 'static'}
+    if request.endpoint in public_endpoints:
+        return None
+    if request.method == 'OPTIONS':
+        return None
+    if not g.current_user:
+        if wants_json_response():
+            return jsonify({'error': 'Sesión requerida'}), 401
+        return redirect(url_for('login', next=request.full_path if request.query_string else request.path))
+    if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'} and not valid_csrf_token():
+        return jsonify({'error': 'Token de seguridad inválido'}), 403
+    return None
 
 def get_sat_credentials(company_key):
     company_key = normalize_company_key(company_key)
@@ -279,6 +585,27 @@ def get_recent_active_sat_job(company_key, request_type, date_from, date_to):
 def ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+def get_app_secret_key():
+    env_secret = os.getenv('APP_SECRET_KEY')
+    if env_secret:
+        return env_secret
+    ensure_data_dir()
+    if os.path.exists(APP_SECRET_KEY_PATH):
+        with open(APP_SECRET_KEY_PATH, 'r', encoding='utf-8') as fh:
+            secret = fh.read().strip()
+            if secret:
+                return secret
+    secret = secrets.token_urlsafe(48)
+    with open(APP_SECRET_KEY_PATH, 'w', encoding='utf-8') as fh:
+        fh.write(secret)
+    try:
+        os.chmod(APP_SECRET_KEY_PATH, 0o600)
+    except Exception:
+        pass
+    return secret
+
+app.secret_key = get_app_secret_key()
+
 def get_sat_master_secret():
     ensure_data_dir()
     if os.path.exists(SAT_MASTER_KEY_PATH):
@@ -489,6 +816,36 @@ def init_db():
     ''')
 
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            display_name TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_login_at TEXT
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            token_hash TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_password_reset_user
+        ON password_reset_tokens (user_id, expires_at)
+    ''')
+
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS sat_credentials (
             company_key TEXT PRIMARY KEY,
             rfc_receptor TEXT NOT NULL,
@@ -560,6 +917,11 @@ def init_db():
         
     conn.commit()
     conn.close()
+
+    bootstrap_user = os.getenv('APP_ADMIN_USER')
+    bootstrap_password = os.getenv('APP_ADMIN_PASSWORD')
+    if bootstrap_user and bootstrap_password and not users_exist():
+        create_user(bootstrap_user, bootstrap_password, os.getenv('APP_ADMIN_NAME', 'Administrador'))
 
 init_db()
 
@@ -885,6 +1247,115 @@ def start_sat_download_job(company_key, date_from, date_to, request_type, resuma
     Thread(target=worker, daemon=True).start()
     return job_id
 
+def safe_next_path(value):
+    if not value or not value.startswith('/') or value.startswith('//'):
+        return url_for('index')
+    return value
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if g.current_user:
+        return redirect(url_for('index'))
+
+    error = None
+    next_path = safe_next_path(request.args.get('next') or request.form.get('next'))
+    if request.method == 'POST':
+        username = request.form.get('username') or ''
+        password = request.form.get('password') or ''
+        if not valid_csrf_token():
+            error = 'Token de seguridad inválido.'
+        elif login_is_limited(username):
+            error = 'Demasiados intentos. Espera unos minutos.'
+        else:
+            user = authenticate_user(username, password)
+            if user:
+                clear_login_failures(username)
+                login_user(user)
+                return redirect(next_path)
+            record_login_failure(username)
+            error = 'Usuario o contraseña incorrectos.'
+
+    return render_template('login.html', error=error, next_path=next_path)
+
+@app.route('/registro', methods=['GET', 'POST'])
+def register():
+    if g.current_user:
+        return redirect(url_for('index'))
+
+    error = None
+    if not registration_is_open():
+        error = 'El registro público está deshabilitado.'
+
+    if request.method == 'POST' and not error:
+        username = request.form.get('username') or ''
+        display_name = request.form.get('display_name') or ''
+        password = request.form.get('password') or ''
+        password_confirm = request.form.get('password_confirm') or ''
+        if not valid_csrf_token():
+            error = 'Token de seguridad inválido.'
+        elif password != password_confirm:
+            error = 'Las contraseñas no coinciden.'
+        else:
+            try:
+                user_id = create_user(username, password, display_name)
+                user = get_user_for_auth(username)
+                login_user({'id': user_id, 'username': user['username']})
+                return redirect(url_for('index'))
+            except ValueError as exc:
+                error = str(exc)
+
+    return render_template('register.html', error=error)
+
+@app.route('/recuperar-password', methods=['GET', 'POST'])
+def forgot_password():
+    if g.current_user:
+        return redirect(url_for('index'))
+
+    error = None
+    sent = False
+    if request.method == 'POST':
+        email = request.form.get('email') or ''
+        if not valid_csrf_token():
+            error = 'Token de seguridad inválido.'
+        elif not validate_email(email):
+            error = 'Ingresa un correo electrónico válido.'
+        else:
+            try:
+                request_password_reset(email)
+                sent = True
+            except Exception:
+                sent = True
+
+    return render_template('forgot_password.html', error=error, sent=sent)
+
+@app.route('/restablecer-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    if g.current_user:
+        return redirect(url_for('index'))
+
+    error = None
+    done = False
+    if request.method == 'POST':
+        password = request.form.get('password') or ''
+        password_confirm = request.form.get('password_confirm') or ''
+        if not valid_csrf_token():
+            error = 'Token de seguridad inválido.'
+        elif password != password_confirm:
+            error = 'Las contraseñas no coinciden.'
+        else:
+            try:
+                reset_password_with_token(token, password)
+                done = True
+            except ValueError as exc:
+                error = str(exc)
+
+    return render_template('reset_password.html', error=error, done=done, token=token)
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
 @app.route('/')
 def index():
     company_key = get_request_company()
@@ -923,10 +1394,11 @@ def api_facturas_recibidas():
 
 @app.route('/api/facturas-recibidas/<entry_id>')
 def api_factura_recibida(entry_id):
+    company_key = get_request_company()
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM cfdi_records WHERE id = ?', (entry_id,))
+    cursor.execute('SELECT * FROM cfdi_records WHERE id = ? AND COALESCE(company_key, "bajanet") = ?', (entry_id, company_key))
     row = cursor.fetchone()
     conn.close()
 
@@ -1140,9 +1612,13 @@ def upload_folder():
 
 @app.route('/preview/<entry_id>')
 def preview_entry(entry_id):
+    company_key = get_request_company()
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT parsed_json, filename, emisor_nombre, emisor_rfc, receptor_nombre, receptor_rfc, fecha, fecha_fmt, metodo_pago, metodo_pago_desc, forma_pago, forma_pago_desc, total, total_fmt, moneda, uuid, serie_folio, tipo, valid, errors, warnings FROM cfdi_records WHERE id = ?', (entry_id,))
+    cursor.execute(
+        'SELECT parsed_json, filename, emisor_nombre, emisor_rfc, receptor_nombre, receptor_rfc, fecha, fecha_fmt, metodo_pago, metodo_pago_desc, forma_pago, forma_pago_desc, total, total_fmt, moneda, uuid, serie_folio, tipo, valid, errors, warnings FROM cfdi_records WHERE id = ? AND COALESCE(company_key, "bajanet") = ?',
+        (entry_id, company_key),
+    )
     res = cursor.fetchone()
     conn.close()
     
@@ -1170,9 +1646,13 @@ def preview_entry(entry_id):
 
 @app.route('/download/<entry_id>')
 def download_entry(entry_id):
+    company_key = get_request_company()
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT parsed_json, serie_folio, uuid FROM cfdi_records WHERE id = ?', (entry_id,))
+    cursor.execute(
+        'SELECT parsed_json, serie_folio, uuid FROM cfdi_records WHERE id = ? AND COALESCE(company_key, "bajanet") = ?',
+        (entry_id, company_key),
+    )
     res = cursor.fetchone()
     conn.close()
     

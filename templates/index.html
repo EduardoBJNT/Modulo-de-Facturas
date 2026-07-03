@@ -27,7 +27,13 @@
 </button>
 <div class="breadcrumb"><span class="root">App Facturas Recibidas</span><span class="sep">/</span><span class="current">{{ company.label }}</span></div>
 </div>
-<div class="search-global"><input type="text" placeholder="Búsqueda global..."></div>
+<div class="topbar-actions">
+<div class="session-user">{{ current_user.display_name or current_user.username }}</div>
+<form method="post" action="/logout">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<button class="btn btn-secondary btn-sm" type="submit">Salir</button>
+</form>
+</div>
 </header>
 
 <div class="content-view">
@@ -78,7 +84,7 @@
 <div class="sat-head">
 <div>
 <div class="sat-title">Descarga directa SAT</div>
-<div class="sat-subtitle">Configura por empresa los archivos `.cer`/`.key` y descarga facturas recibidas sin cargar XML manualmente.</div>
+<div class="sat-subtitle">Configura los archivos `.cer`/`.key` y descarga facturas recibidas sin cargar XML manualmente.</div>
 </div>
 <div class="sat-pill" id="satConfigPill">Sin configurar</div>
 </div>
@@ -185,6 +191,7 @@ const CURRENT_COMPANY='{{ selected_company }}';
 const COMPANY_LABEL='{{ company.label }}';
 const COMPANY_OPTIONS={{ companies|tojson }};
 const COMPANY_RFC_HINTS={bajanet:'BAJ100903KC6',iamet:'IAM170712NL7'};
+const CSRF_TOKEN='{{ csrf_token() }}';
 let allRows=[],filtered=[],sortCol='fecha',sortDir=-1,page=0,selectedId=null;
 const PS=15;
 let calMonth,calYear,dateFrom=null,dateTo=null,calSelecting='from';
@@ -281,7 +288,7 @@ async function loadSatConfig(){
       }
     } else {
       setSatPill('warn', 'Sin configurar');
-      note.textContent = 'Carga una vez los archivos .cer y .key por empresa. Las credenciales quedan cifradas localmente.';
+      note.textContent = 'Carga una vez los archivos .cer y .key. Las credenciales quedan cifradas localmente.';
     }
     document.getElementById('btnSatDownload').disabled = !!data.configured && !data.auth_valid;
   } catch (e) {
@@ -358,7 +365,7 @@ async function upload(files,url,field){
   else Array.from(files).forEach(f=>{if(f.name.toLowerCase().endsWith('.xml'))fd.append(field,f)});
   
   try{
-    const r=await fetch(url,{method:'POST',body:fd});
+    const r=await fetch(url,{method:'POST',headers:{'X-CSRF-Token': CSRF_TOKEN},body:fd});
     const j=await r.json();
     if(j.error){
       showSts(j.error,'error');
@@ -397,7 +404,7 @@ document.getElementById('btnFolder').onclick=async ()=>{
   try {
     const r = await fetch('/upload-folder',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','X-CSRF-Token': CSRF_TOKEN},
       body:JSON.stringify({folder_path:p, company: CURRENT_COMPANY})
     });
     const j = await r.json();
@@ -448,7 +455,7 @@ async function saveSatConfig(){
   document.getElementById('btnSatSave').disabled = true;
   showSts('Guardando credenciales SAT...', 'loading');
   try {
-    const res = await fetch('/api/sat/config', { method: 'POST', body: fd });
+    const res = await fetch('/api/sat/config', { method: 'POST', headers:{'X-CSRF-Token': CSRF_TOKEN}, body: fd });
     const data = await res.json();
     if (!res.ok || data.error) {
       throw new Error(data.error || 'No fue posible guardar la configuración');
@@ -496,7 +503,7 @@ async function runSatDownload(){
   try {
     const res = await fetch('/api/sat/download', {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
+      headers: {'Content-Type':'application/json','X-CSRF-Token': CSRF_TOKEN},
       body: JSON.stringify({
         company: CURRENT_COMPANY,
         date_from: dateFrom,
@@ -758,7 +765,7 @@ function updateDateLabel(){
 document.addEventListener('click',e=>{if(!e.target.closest('.date-range-wrap'))document.getElementById('calendarPopup').classList.remove('show')});
 
 /* === CLEAR === */
-function clearAll(){if(!confirm('¿Limpiar permanentemente los registros de ' + COMPANY_LABEL + '?'))return;fetch(withCompany('/clear'),{method:'POST'});allRows=[];filtered=[];selectedId=null;render();document.getElementById('filterBar').style.display='none';document.getElementById('mainArea').style.display='none';document.getElementById('detailContent').innerHTML='<div style="text-align:center;padding:60px 20px;color:var(--text-muted)"><div style="font-size:40px;margin-bottom:12px;opacity:.4">📋</div><p>Selecciona un CFDI</p></div>';showSts('Base de datos limpiada para ' + COMPANY_LABEL,'success')}
+function clearAll(){if(!confirm('¿Limpiar permanentemente los registros de ' + COMPANY_LABEL + '?'))return;fetch(withCompany('/clear'),{method:'POST',headers:{'X-CSRF-Token': CSRF_TOKEN}});allRows=[];filtered=[];selectedId=null;render();document.getElementById('filterBar').style.display='none';document.getElementById('mainArea').style.display='none';document.getElementById('detailContent').innerHTML='<div style="text-align:center;padding:60px 20px;color:var(--text-muted)"><div style="font-size:40px;margin-bottom:12px;opacity:.4">📋</div><p>Selecciona un CFDI</p></div>';showSts('Base de datos limpiada para ' + COMPANY_LABEL,'success')}
 
 /* === UTILS === */
 function showSts(m,t){const s=document.getElementById('statusBar');s.className='status-msg show '+t;s.innerHTML=(t==='loading'?'<div class="spin"></div>':'')+m}
